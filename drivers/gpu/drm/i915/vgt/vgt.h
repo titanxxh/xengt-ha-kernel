@@ -316,6 +316,8 @@ typedef struct {
 	uint64_t	mmio_base_gpa;	/* base guest physical address of the MMIO registers */
 	vgt_reg_t	*vReg;		/* guest view of the register state */
 	vgt_reg_t	*sReg;		/* Shadow (used by hardware) state of the register */
+	vgt_reg_t	*vReg_cp;
+	vgt_reg_t	*sReg_cp;
 	uint8_t	cfg_space[VGT_CFG_SPACE_SZ];
 	bool	bar_mapped[VGT_BAR_NUM];
 	uint64_t	gt_mmio_base;	/* bar0/GTTMMIO */
@@ -336,9 +338,11 @@ typedef struct {
 } vgt_ring_ppgtt_t;
 
 #define __vreg(vgt, off) (*(vgt_reg_t *)((char *)vgt->state.vReg + off))
+#define __vreg_cp(vgt, off) (*(vgt_reg_t *)((char *)vgt->state.vReg_cp + off))
 #define __vreg8(vgt, off) (*(char *)((char *)vgt->state.vReg + off))
 #define __vreg16(vgt, off) (*(uint16_t *)((char *)vgt->state.vReg + off))
 #define __sreg(vgt, off) (*(vgt_reg_t *)((char *)vgt->state.sReg + off))
+#define __sreg_cp(vgt, off) (*(vgt_reg_t *)((char *)vgt->state.sReg_cp + off))
 #define __sreg8(vgt, off) (*(char *)((char *)vgt->state.sReg + off))
 #define __vreg64(vgt, off) (*(unsigned long *)((char *)vgt->state.vReg + off))
 #define __sreg64(vgt, off) (*(unsigned long *)((char *)vgt->state.sReg + off))
@@ -615,7 +619,7 @@ struct vgt_vgtt_info {
 	atomic_t n_write_protected_guest_page;
 };
 
-extern bool vgt_init_vgtt(struct vgt_device *vgt);
+extern bool vgt_init_vgtt(struct vgt_device *vgt, struct vgt_vgtt_info *gtt);
 extern void vgt_clean_vgtt(struct vgt_device *vgt);
 
 extern bool vgt_expand_shadow_page_mempool(struct vgt_device *vgt);
@@ -706,6 +710,9 @@ struct vgt_render_context_ops {
 extern bool vgt_render_init(struct pgt_device *pdev);
 extern bool idle_rendering_engines(struct pgt_device *pdev, int *id);
 extern bool idle_render_engine(struct pgt_device *pdev, int id);
+extern bool vgt_ha_save(struct vgt_device *vgt);
+extern bool vgt_ha_restore(struct vgt_device *vgt);
+extern int vgt_ha_create_checkpoint(struct vgt_device *vgt);
 extern bool vgt_do_render_context_switch(struct pgt_device *pdev);
 extern bool vgt_do_render_sched(struct pgt_device *pdev);
 extern void vgt_destroy(void);
@@ -873,6 +880,28 @@ struct gt_port {
 	enum vgt_port physcal_port;
 };
 
+typedef struct {
+	int checkpoint_id;
+	int checkpoint_request;
+	int save_request;
+	int saving;
+	int restore_request;
+	int restoring;
+	/* stop ha when instance is supposed to be removed from render run queue */
+	bool force_disable_ha;
+	bool enabled;
+	uint64_t saved_gm_size;
+	uint32_t *saved_gm;
+	unsigned long *saved_gm_bitmap;
+	unsigned long last_changed_pages_cnt;
+	bool incremental;
+	bool gm_first_cached;
+	uint32_t *saved_context_save_area;
+	struct vgt_vgtt_info gtt_saved;
+	struct task_struct *checkpoint_thread;
+	bool track_mmio;
+} vgt_ha_t;
+
 struct vgt_device {
 	enum vgt_pipe pipe_mapping[I915_MAX_PIPES];
 	int vgt_id;		/* 0 is always for dom0 */
@@ -880,7 +909,9 @@ struct vgt_device {
 	struct pgt_device *pdev;	/* the pgt device where the GT device registered. */
 	struct list_head	list;	/* FIXME: used for context switch ?? */
 	vgt_state_t	state;		/* MMIO state except ring buffers */
+	vgt_ha_t	ha;		/* vgt ha struct */
 	vgt_state_ring_t	rb[MAX_ENGINES];	/* ring buffer state */
+	vgt_state_ring_t	rb_cp[MAX_ENGINES];
 
 	struct gt_port		ports[I915_MAX_PORTS]; /* one port per PIPE */
 	struct vgt_i2c_edid_t	vgt_i2c_edid;	/* i2c bus state emulaton for reading EDID */
@@ -1894,7 +1925,7 @@ static inline bool h_gm_is_visible(struct vgt_device *vgt, uint64_t h_addr)
 		(h_addr <= vgt_visible_gm_end(vgt));
 }
 
-/* check whether a host GM address is out of the CPU visible range */
+/* check whether a host GM address is out of the CPU hidden range */
 static inline bool h_gm_is_hidden(struct vgt_device *vgt, uint64_t h_addr)
 {
 	if (vgt->bypass_addr_check)
@@ -2147,6 +2178,15 @@ static inline int vgt_nr_in_runq(struct pgt_device *pdev)
 	int count = 0;
 	struct list_head *pos;
 	list_for_each(pos, &pdev->rendering_runq_head)
+		count++;
+	return count;
+}
+
+static inline int vgt_nr_in_idleq(struct pgt_device *pdev)
+{
+	int count = 0;
+	struct list_head *pos;
+	list_for_each(pos, &pdev->rendering_idleq_head)
 		count++;
 	return count;
 }

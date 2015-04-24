@@ -1135,6 +1135,7 @@ int vgt_reset_device(struct pgt_device *pdev)
 					set_bit(i, &vgt->enabled_rings_before_reset);
 				}
 			}
+			vgt_info("XXH: vm %d enabled rings %lx\n", vgt->vm_id, vgt->enabled_rings_before_reset);
 
 			set_bit(WAIT_RESET, &vgt->reset_flags);
 		}
@@ -1173,6 +1174,12 @@ int vgt_reset_device(struct pgt_device *pdev)
 
 	vgt_info("Enable master interrupt, DEIER: %lx\n", ier);
 
+	vgt_info("XXH: after reset run queue count: %d\n", vgt_nr_in_runq(pdev));
+	list_for_each_safe(pos, n, &pdev->rendering_runq_head) {
+		vgt = list_entry(pos, struct vgt_device, list);
+		vgt_info("vm %d is in run queue\n", vgt->vm_id);
+	}
+	vgt_info("XXH: after reset idle queue count: %d\n", vgt_nr_in_idleq(vgt->pdev));
 	return 0;
 }
 

@@ -102,6 +102,7 @@ enum vgt_debugfs_entry_t
 	VGT_DEBUGFS_FB_FORMAT,
 	VGT_DEBUGFS_DPY_INFO,
 	VGT_DEBUGFS_VIRTUAL_GTT,
+	VGT_DEBUGFS_HA_CP,
 	VGT_DEBUGFS_ENTRY_MAX
 };
 
@@ -910,6 +911,69 @@ static const struct file_operations vgt_el_context_fops = {
 	.release = single_release,
 };
 
+static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
+{
+	struct vgt_device *vgt =  (struct vgt_device *)m->private;
+
+	seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
+	seq_printf(m, "last_changed_pages_cnt=%lu\n", vgt->ha.last_changed_pages_cnt);
+	return 0;
+}
+
+static int vgt_ha_checkpoint_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, vgt_ha_checkpoint_show, inode->i_private);
+}
+
+static ssize_t vgt_ha_checkpoint_write(struct file *file,
+		const char __user *ubuf, size_t count, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct vgt_device *vgt =  (struct vgt_device *)s->private;
+	char buf[32];
+
+	if (*ppos && count > sizeof(buf))
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+
+	if (!strncmp(buf, "create", 6)) {
+		vgt->ha.checkpoint_request = 1;
+	} else if (!strncmp(buf, "enable", 6)) {
+		vgt->ha.enabled = !vgt->ha.enabled;
+		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
+	} else if (!strncmp(buf, "inc", 3)) {
+		vgt->ha.incremental = !vgt->ha.incremental;
+		vgt_info("XXH: ha incremental status %d for vgt %d\n", vgt->ha.incremental, vgt->vm_id);
+		if (vgt->ha.incremental)
+			vgt->ha.gm_first_cached = false;
+	} else if (!strncmp(buf, "restore", 7)) {
+		vgt->ha.restore_request = 1;
+		vgt_info("XXH: ha restore request set\n");
+	} else if (!strncmp(buf, "nrrunq", 6)) {
+		vgt_info("run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+		vgt_info("idle queue count: %d\n", vgt_nr_in_idleq(vgt->pdev));
+	} else if (!strncmp(buf, "vrings", 6)) {
+		int i;
+		for (i = 0; i < vgt->pdev->max_engines; i++) {
+			vgt_info("vm %d ring %d startgma %x size %lx\n", vgt->vm_id, i, vgt->rb[i].vring.start, _RING_CTL_BUF_SIZE(vgt->rb[i].vring.ctl));
+		}
+	} else {
+		vgt_info("XXH: accepted cmd:\ncreate\nenable\nrestore\n");
+	}
+
+	return count;
+}
+
+static const struct file_operations ha_checkpoint_fops = {
+	.open = vgt_ha_checkpoint_open,
+	.read = seq_read,
+	.write = vgt_ha_checkpoint_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 /* initialize vGT debufs top directory */
 struct dentry *vgt_init_debugfs(struct pgt_device *pdev)
 {
@@ -1091,6 +1155,14 @@ int vgt_create_debugfs(struct vgt_device *vgt)
 		printk(KERN_ERR "vGT(%d): failed to create debugfs node: frame_buffer_format\n", vgt_id);
 	else
 		printk("vGT(%d): create debugfs node: frame_buffer_format\n", vgt_id);
+
+	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_CP] = debugfs_create_file("ha_checkpoint",
+			0444, d_per_vgt[vgt_id], vgt, &ha_checkpoint_fops);
+
+	if (!d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_CP])
+		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_checkpoint\n", vgt_id);
+	else
+		printk("vGT(%d): create debugfs node: ha_checkpoint\n", vgt_id);
 
 	/* perf vm perfermance statistics */
 	perf_dir_entry = debugfs_create_dir("perf", d_per_vgt[vgt_id]);

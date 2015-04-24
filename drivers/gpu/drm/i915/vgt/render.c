@@ -587,6 +587,62 @@ vgt_reg_t vgt_gen8_render_regs[] = {
         _REG_BCS_EXECLIST_STATUS,
 };
 
+static void __vgt_ha_rendering_save(struct vgt_device *vgt, int num, vgt_reg_t *regs, bool cur_vgt)
+{
+	vgt_reg_t	*sreg, *vreg;	/* shadow regs */
+	int i;
+
+	sreg = vgt->state.sReg_cp;
+	vreg = vgt->state.vReg_cp;
+
+	if (!cur_vgt) {
+		for (i = 0; i < num; i++) {
+			int reg = regs[i];
+			__sreg_cp(vgt, reg) = __sreg(vgt, reg);
+			__vreg_cp(vgt, reg) = __vreg(vgt, reg);
+		}
+		return;
+	}
+
+	for (i=0; i<num; i++) {
+		int reg = regs[i];
+		//if (reg_hw_status(vgt->pdev, reg)) {
+		/* FIXME: only hw update reg needs save */
+		if (!reg_mode_ctl(vgt->pdev, reg))
+		{
+			__sreg_cp(vgt, reg) = VGT_MMIO_READ(vgt->pdev, reg);
+			__vreg_cp(vgt, reg) = mmio_h2g_gmadr(vgt, reg, __sreg_cp(vgt, reg));
+			vgt_dbg(VGT_DBG_RENDER, "....save mmio (%x) with (%x)\n", reg, __sreg(vgt, reg));
+		}
+	}
+}
+
+static void vgt_ha_rendering_save_mmio(struct vgt_device *vgt, bool cur_vgt)
+{
+	struct pgt_device *pdev = vgt->pdev;
+
+	vgt_info("XXH: saving%scurrent mmio\n", cur_vgt ? " " : " not ");
+	/*
+	 * both save/restore refer to the same array, so it's
+	 * enough to track only save part
+	 */
+	if (IS_SNB(pdev))
+		__vgt_ha_rendering_save(vgt,
+				ARRAY_NUM(vgt_render_regs),
+				&vgt_render_regs[0],
+				cur_vgt);
+	else if (IS_IVB(pdev) || IS_HSW(pdev))
+		__vgt_ha_rendering_save(vgt,
+				ARRAY_NUM(vgt_gen7_render_regs),
+				&vgt_gen7_render_regs[0],
+				cur_vgt);
+	else if (IS_BDW(pdev))
+		__vgt_ha_rendering_save(vgt,
+				ARRAY_NUM(vgt_gen8_render_regs),
+				&vgt_gen8_render_regs[0],
+				cur_vgt);
+}
+
 static void __vgt_rendering_save(struct vgt_device *vgt, int num, vgt_reg_t *regs)
 {
 	vgt_reg_t	*sreg, *vreg;	/* shadow regs */
@@ -631,8 +687,22 @@ static void vgt_rendering_save_mmio(struct vgt_device *vgt)
 		__vgt_rendering_save(vgt,
 				ARRAY_NUM(vgt_gen8_render_regs),
 				&vgt_gen8_render_regs[0]);
+	if ((vgt->ha.enabled && vgt->vm_id && !vgt->ha.force_disable_ha) || vgt->ha.save_request) {
+		vgt_ha_rendering_save_mmio(vgt, true);
+	}
 
 	pdev->in_ctx_switch = 0;
+}
+
+static void __vgt_ha_rendering_restore (struct vgt_device *vgt, int num_render_regs, vgt_reg_t *render_regs)
+{
+	int i;
+
+	for (i = 0; i < num_render_regs; i++) {
+		int reg = render_regs[i];
+		__sreg(vgt, reg) = __sreg_cp(vgt, reg);
+		__vreg(vgt, reg) = __vreg_cp(vgt, reg);
+	}
 }
 
 static void __vgt_rendering_restore (struct vgt_device *vgt, int num_render_regs, vgt_reg_t *render_regs)
@@ -672,6 +742,16 @@ static void __vgt_rendering_restore (struct vgt_device *vgt, int num_render_regs
 			vgt_warn("restore %x: failed:  val=%x, val_read_back=%x\n",
 				reg, val, res_val);
 	}
+}
+
+void vgt_ha_rendering_restore_mmio(struct vgt_device *vgt)
+{
+	struct pgt_device *pdev = vgt->pdev;
+
+	if (IS_SNB(pdev))
+		__vgt_ha_rendering_restore(vgt, ARRAY_NUM(vgt_render_regs), &vgt_render_regs[0]);
+	else if (IS_IVB(pdev) || IS_HSW(pdev))
+		__vgt_ha_rendering_restore(vgt, ARRAY_NUM(vgt_gen7_render_regs), &vgt_gen7_render_regs[0]);
 }
 
 /*
@@ -1812,6 +1892,306 @@ bool vgt_render_init(struct pgt_device *pdev)
 	return true;
 }
 
+extern struct vgt_device *vgt_dom0;
+
+int vgt_ha_restore_gtt_gm(struct vgt_device *vgt)
+{
+	uint32_t i, low_frame_cnt;
+	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	void *va;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	cycles_t t0, t1;
+
+	printk("XXH restore gtt & gm start\n");
+	t0 = vgt_get_cycles();
+	memcpy(mm->virtual_page_table, vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->page_table_entry_size);
+	for (i = 0; i < vgt_aperture_sz(vgt) >> PAGE_SHIFT; i++)
+	{
+		gma = low_base + (i << PAGE_SHIFT);
+		va = vgt_gma_to_va(mm, gma);
+		memcpy(va, (char *)vgt->ha.saved_gm + (i << PAGE_SHIFT), 1 << PAGE_SHIFT);
+	}
+	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
+	for (i = 0; i <  vgt_hidden_gm_sz(vgt) >> PAGE_SHIFT; i++)
+	{
+		gma = high_base + (i << PAGE_SHIFT);
+		va = vgt_gma_to_va(mm, gma);
+		memcpy(va, (char *)vgt->ha.saved_gm + ((low_frame_cnt + i) << PAGE_SHIFT), 1 << PAGE_SHIFT);
+	}
+	t1 = vgt_get_cycles();
+	cost = t1 - t0;
+	printk("XXH restore mem cost time %lld\n", cost);
+	return 0;
+}
+
+int vgt_ha_save_entire_gm(struct vgt_device *vgt)
+{
+	uint32_t i, low_frame_cnt;
+	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	void *va;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	cycles_t t0, t1;
+
+	t0 = vgt_get_cycles();
+	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
+	for (i = 0; i < low_frame_cnt; i++)
+	{
+		gma = low_base + (i << PAGE_SHIFT);
+		va = vgt_gma_to_va(mm, gma);
+		memcpy((char *)vgt->ha.saved_gm + (i << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+	}
+	for (i = 0; i <  vgt_hidden_gm_sz(vgt) >> PAGE_SHIFT; i++)
+	{
+		gma = high_base + (i << PAGE_SHIFT);
+		va = vgt_gma_to_va(mm, gma);
+		memcpy((char *)vgt->ha.saved_gm + ((low_frame_cnt + i) << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+	}
+	if (vgt->ha.incremental)
+		vgt->ha.gm_first_cached = true;
+	t1 = vgt_get_cycles();
+	cost = t1 - t0;
+	printk("XXH save entire gm cost %lld total pages: %d\n", cost, i + low_frame_cnt);
+	return 0;
+}
+
+int vgt_ha_save_partial_gm(struct vgt_device *vgt)
+{
+	int pos, changes = 0;
+	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	uint32_t low_frame_cnt;
+	void *va;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	cycles_t t0, t1;
+
+	t0 = vgt_get_cycles();
+	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
+	for_each_set_bit(pos, vgt->ha.saved_gm_bitmap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
+	{
+		changes ++;
+		if (pos < low_frame_cnt)
+			gma = low_base + (pos << PAGE_SHIFT);
+		else
+			gma = high_base + ((pos - low_frame_cnt) << PAGE_SHIFT);
+		va = vgt_gma_to_va(mm, gma);
+		memcpy((char *)vgt->ha.saved_gm + (pos << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+	}
+	t1 = vgt_get_cycles();
+	cost = t1 - t0;
+	vgt->ha.last_changed_pages_cnt = changes;
+//	printk("XXH save partial gm cost %lld total pages: %d\n", cost, changes);
+	return 0;
+}
+
+int vgt_ha_save_gtt_gm(struct vgt_device *vgt)
+{
+	int ret;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+
+	flush_cache_all();
+	vgt_info("XXH: saving gtt & gm\n");
+	//TODO: both virtual_page_table and shadow_page_table need copy?
+	memcpy(vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->virtual_page_table, mm->page_table_entry_size);
+	if (!vgt->ha.incremental || !vgt->ha.gm_first_cached)
+	{
+		ret = vgt_ha_save_entire_gm(vgt);
+	}
+	else
+	{
+		ret = vgt_ha_save_partial_gm(vgt);
+	}
+	bitmap_clear(vgt->ha.saved_gm_bitmap, 0, vgt->ha.saved_gm_size >> PAGE_SHIFT);
+	return ret;
+}
+
+void vgt_ha_restore_context_save_area(struct vgt_device *vgt, int i)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	vgt_state_ring_t *rb = &vgt->rb[i];
+	uint32_t offset = i * SZ_CONTEXT_AREA_PER_RING;
+	vgt_info("XXH: restoring context_save_area %d\n", i);
+	memcpy(v_aperture(pdev, rb->context_save_area), (char *)vgt->ha.saved_context_save_area + offset, SZ_CONTEXT_AREA_PER_RING);
+}
+
+void vgt_ha_save_context_save_area(struct vgt_device *vgt, int i)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	vgt_state_ring_t *rb = &vgt->rb[i];
+	uint32_t offset = i * SZ_CONTEXT_AREA_PER_RING;
+	/*int j;
+	for (j = 0; j < SZ_CONTEXT_AREA_PER_RING / sizeof(uint32_t); j += sizeof(uint32_t)) {
+		char *ptr = (char *)vgt->ha.saved_context_save_area + offset + j;
+		if (*(uint32_t *)ptr != *(uint32_t *)(v_aperture(pdev, rb->context_save_area) + j)) {
+			printk("context_save_area ring %d offset %d different\n", i, j);
+			break;
+		}
+	}*/
+	vgt_info("XXH: saving context_save_area %d\n", i);
+	memcpy((char *)vgt->ha.saved_context_save_area + offset, v_aperture(pdev, rb->context_save_area), SZ_CONTEXT_AREA_PER_RING);
+}
+
+int xxh_debug;
+EXPORT_SYMBOL(xxh_debug);
+
+int vgt_ha_create_checkpoint(struct vgt_device *vgt)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	int cpu;
+	int i = 0;
+	vgt_info("XXH create cp %d\n", vgt->ha.checkpoint_id);
+	vgt->ha.checkpoint_id++;
+	//vgt_lock_dev(pdev, cpu);
+	if (vgt != current_render_owner(pdev)) {
+		vgt_info("not current_render_owner! can start save now\n");
+		vgt_ha_save(vgt);
+		//we should remove domu vgt from queue & reset gpu & add it back here
+		/*for (i = 0; i < pdev->max_engines; i++) {
+			vgt_disable_ring(vgt, i);
+		}*/
+		/*list_del(&vgt->list);
+		list_add(&vgt->list, &pdev->rendering_idleq_head);*/
+		//vgt_reset_device(pdev);
+		/*list_del(&vgt->list);
+		list_add(&vgt->list, &pdev->rendering_runq_head);*/
+		/*for (i = 0; i < pdev->max_engines; i++) {
+			vgt_enable_ring(vgt, i);
+		}*/
+		//vgt->ha.restore_request = 1;
+		vgt_ha_restore(vgt);
+		//vgt_unlock_dev(pdev, cpu);
+	}
+	else {//will never go into this block now because we sched outside
+		vgt_info("current_render_owner! send ctx switch request\n");
+		vgt_unlock_dev(pdev, cpu);
+		vgt->ha.save_request = 1;
+		if (vgt == current_render_owner(pdev)) {
+			pdev->next_sched_vgt = vgt_dom0;
+			vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+		}
+		while (vgt == current_render_owner(pdev)) {
+			msleep(5);
+			i++;
+		}
+		vgt_info("%d tried until not current_render_owner! & save done\n", i);
+		//we should remove domu vgt from queue & reset gpu & add it back here
+		vgt_lock_dev(pdev, cpu);
+		vgt_ha_restore(vgt);
+		vgt_unlock_dev(pdev, cpu);
+		//vgt->ha.restore_request = 1;
+	}
+	xxh_debug = 0;
+	pdev->next_sched_vgt = vgt;
+	vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+	return 0;
+}
+
+int vgt_ha_checkpoint_thread(void *priv)
+{
+	struct vgt_device *vgt = (struct vgt_device *)priv;
+	struct pgt_device *pdev = vgt->pdev;
+	vgt_ha_t *ha = &(vgt->ha);
+	int i = 0;
+
+	ha->checkpoint_id = ha->checkpoint_request = 0;
+	ha->saving = ha->save_request = 0;
+	ha->restoring = ha->restore_request = 0;
+	ha->enabled = false;
+	ha->incremental = false;
+	ha->gm_first_cached = false;
+	vgt_info("XXH: vm %d ha thread start\n", vgt->vm_id);
+	while (true)
+	{
+		msleep(15);
+		if (kthread_should_stop())
+			return 0;
+		if (!ha->checkpoint_request)
+			continue;
+		/*_hypercall2(long, gpu_checkpoint_op, 0, vgt->vm_id);
+		while (!_hypercall2(long, gpu_checkpoint_op, 2, vgt->vm_id)) {
+			vgt_info("XXH: domu not paused yet\n");
+		}*/
+		if (vgt == current_render_owner(pdev)) {
+			pdev->next_sched_vgt = vgt_dom0;
+			vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+		}
+		while (vgt == current_render_owner(pdev)) {
+			msleep(5);
+			i++;
+		}
+		vgt_info("%d tried until not current_render_owner!\n", i);
+		vgt_ha_create_checkpoint(vgt);
+		ha->checkpoint_request = 0;
+		continue;
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(vgt_ha_checkpoint_thread);
+
+void print_ring_state(vgt_state_ring_t *rs)
+{
+	int next, cmd_nr = 0;
+	struct cmd_general_info *list = &rs->tail_list;
+	struct cmd_tail_info *entry, *target = NULL;
+
+	next = list->head;
+	while (next != list->tail) {
+		next++;
+		if (next == list->count)
+			next = 0;
+		entry = &list->cmd[next];
+		target = entry;
+		cmd_nr += entry->cmd_nr;
+	}
+
+	printk("XXH: cmd_nr %d taillist head %d tail %d\n", cmd_nr, list->head, list->tail);
+	printk("XXH: head %x tail %x\n", rs->sring.head, rs->sring.tail);
+}
+
+bool vgt_ha_save(struct vgt_device *vgt)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	int i;
+	vgt_info("XXH: start ha save\n");
+	vgt_ha_rendering_save_mmio(vgt, false);
+	for (i = 0; i < pdev->max_engines; i++) {
+		vgt_state_ring_t *rb = &vgt->rb[i];
+		vgt_state_ring_t *rb_cp = &vgt->rb_cp[i];
+		vgt_info("XXH: saving ring %d state\n", i);
+		memcpy(rb_cp, rb, sizeof(vgt_state_ring_t));
+		vgt_ha_save_context_save_area(vgt, i);
+	}
+	vgt_ha_save_gtt_gm(vgt);
+	return 0;
+}
+
+bool vgt_ha_restore(struct vgt_device *vgt)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	cycles_t t0, t1;
+	u64 cost;
+	int i;
+
+	vgt_info("XXH: vgt %d ha restore start\n", vgt->vm_id);
+	vgt->ha.restoring = 1;
+	t0 = vgt_get_cycles();
+	vgt_ha_restore_gtt_gm(vgt);
+	for (i = 0; i < pdev->max_engines; i++) {
+		vgt_state_ring_t *rb = &vgt->rb[i];
+		vgt_state_ring_t *rb_cp = &vgt->rb_cp[i];
+
+		/*printk("XXH: saved ring %d sring head %x tail %x\n", i, rb_cp->sring.head, rb_cp->sring.tail);
+		printk("XXH: saved ring %d vring head %x tail %x\n", i, rb_cp->vring.head, rb_cp->vring.tail);*/
+
+		memcpy(rb, rb_cp, sizeof(vgt_state_ring_t));
+		vgt_ha_restore_context_save_area(vgt, i);
+	}
+	vgt_ha_rendering_restore_mmio(vgt);
+	t1 = vgt_get_cycles();
+	cost = t1 - t0;
+	vgt->ha.restoring = 0;
+	printk("XXH ha restore cost %lld\n", cost);
+	return false;
+}
+
 bool vgt_do_render_sched(struct pgt_device *pdev)
 {
 	int threshold = 500; /* print every 500 times */
@@ -1895,7 +2275,6 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 	}
 
 	vgt_dbg(VGT_DBG_RENDER, "vGT: next vgt (%d)\n", next->vgt_id);
-	
 
 	/* variable exported by debugfs */
 	context_switch_num ++;
@@ -1909,16 +2288,51 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 			(t0 - prev->stat.schedule_in_time);
 	vgt_ctx_switch(pdev)++;
 
+	if (prev->ha.save_request)
+		vgt_info("XXH: request to save\n");
+	if (next->ha.restore_request)
+		vgt_info("XXH: request to restore\n");
+	/*if (prev->vm_id == 0 && next->ha.restore_request && next->ha.enabled && !next->ha.force_disable_ha) {
+		if (!vgt_ha_restore(next)) {
+			vgt_info("restore succ!\n");
+		}
+		else
+			vgt_info("restore fail!\n");
+	}*/
+
+	if (prev->vm_id == 0 && next->ha.restore_request) {
+		if (!vgt_ha_restore(next)) {
+			vgt_info("restore succ!\n");
+		}
+		else
+			vgt_info("restore fail!\n");
+	}
+
 	/* STEP-1: manually save render context */
 	vgt_rendering_save_mmio(prev);
 
 	/* STEP-2: HW render context switch */
 	for (i=0; i < pdev->max_engines; i++) {
+		vgt_state_ring_t *rb = &prev->rb[i];
+		vgt_state_ring_t *rb_cp = &prev->rb_cp[i];
 		if (!pdev->ring_buffer[i].need_switch)
-			continue;
+			goto loopout;
 
 		context_ops->ring_context_switch(pdev, i, prev, next);
+loopout:
+		if ((prev->ha.enabled && prev->vm_id && !prev->ha.force_disable_ha) || prev->ha.save_request) {
+//			int val = *(int *)(v_aperture(pdev, rb->context_save_area));
+			memcpy(rb_cp, rb, sizeof(vgt_state_ring_t));
+			vgt_ha_save_context_save_area(prev, i);
+//			printk("XXH: ring %d need_switch %d stateless %d\n", i, ring->need_switch, ring->stateless);
+//			printk("XXH: rb sring.head %x active_vm_ctx %x\n context_save_area %p val %d\n", rb->sring.head, rb->active_vm_context, (void *)rb->context_save_area, val);
+		}
 	}
+
+	if ((prev->ha.enabled && prev->vm_id && !prev->ha.force_disable_ha) || prev->ha.save_request) {
+		vgt_ha_save_gtt_gm(prev);
+	}
+	prev->ha.save_request = 0;
 
 	/* STEP-3: manually restore render context */
 	vgt_rendering_restore_mmio(next);
@@ -1932,6 +2346,12 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 	/* ppgtt switch must be done after render owner switch */
 	if (!pdev->enable_execlist && pdev->enable_ppgtt && next->gtt.active_ppgtt_mm_bitmap)
 		vgt_ppgtt_switch(next);
+
+	if (prev->vm_id == 0 && next->ha.restore_request) {
+		vgt_info("XXH: restore finishied. hypercall to unpause domainU");
+		next->ha.restore_request = 0;
+		//_hypercall2(long, gpu_checkpoint_op, 1, next->vm_id);
+	}
 
 	/* STEP-6: ctx switch ends, and then kicks of new tail */
 	vgt_kick_off_execution(next);

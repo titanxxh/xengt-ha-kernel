@@ -1648,9 +1648,8 @@ static void mempool_free_spt(void *element, void *pool_data)
 	kfree(spt);
 }
 
-bool vgt_init_vgtt(struct vgt_device *vgt)
+bool vgt_init_vgtt(struct vgt_device *vgt, struct vgt_vgtt_info *gtt)
 {
-	struct vgt_vgtt_info *gtt = &vgt->gtt;
 	struct vgt_mm *ggtt_mm;
 
 	hash_init(gtt->guest_page_hash_table);

@@ -2313,11 +2313,30 @@ static void trace_cs_command(struct parser_exec_state *s)
 
 }
 
+static int set_dirty_gm_bitmap(struct vgt_device *vgt, struct parser_exec_state *s)
+{
+	unsigned long gma, offset;
+	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
+	//gma should be all possible gma here not ip_gma
+	gma = s->ip_gma;
+	if (h_gm_is_hidden(vgt, gma))
+		offset = (h_gm_hidden_offset(vgt, gma) + vgt_aperture_sz(vgt)) >> PAGE_SHIFT;
+	else if (h_gm_is_visible(vgt, gma))
+		offset = h_gm_visible_offset(vgt, gma) >> PAGE_SHIFT;
+	else//invalid gma
+	{
+		vgt_err("XXH: invalid gma in set_dirty!\n");
+		return -1;
+	}
+	bitmap_set(bitmap, offset, 1);
+	return 0;
+}
+
 /* call the cmd handler, and advance ip */
-static int vgt_cmd_parser_exec(struct parser_exec_state *s)
+static int vgt_cmd_parser_exec(struct vgt_device *vgt, struct parser_exec_state *s)
 {
 	struct cmd_info *info;
-	uint32_t cmd;
+	uint32_t cmd, cmd_len, i;
 	int rc = 0;
 
 	hypervisor_read_va(s->vgt, s->ip_va, &cmd, sizeof(cmd), 1);
@@ -2338,15 +2357,22 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 
 	vgt_cmd_addr_audit_with_bitmap(s, info->addr_bitmap);
 
+	//use s->info to set bit in gm bitmap
+	if (vgt->vm_id)
+		set_dirty_gm_bitmap(vgt, s);
+
 	/* Let's keep this logic here. Someone has special needs for dumping
 	 * commands can customize this code snippet.
 	 */
-#if 0
-	klog_printk("%s ip(%08lx): ",
-			s->buf_type == RING_BUFFER_INSTRUCTION ?
-			"RB" : "BB",
+#if 1
+	klog_printk("VM%d CMD %s name %s op 0x%x ip(%08lx): ",
+			vgt->vm_id,
+			s->buf_type == RING_BUFFER_INSTRUCTION ? "RB" : "BB",
+			s->info->name,
+			s->info->opcode,
 			s->ip_gma);
-	for (i = 0; i < cmd_length(s); i++) {
+	cmd_len = cmd_length(s);
+	for (i = 0; i < cmd_len; i++) {
 		klog_printk("%08x ", cmd_val(s, i));
 	}
 	klog_printk("\n");
@@ -2454,7 +2480,7 @@ static int __vgt_scan_vring(struct vgt_device *vgt, int ring_id, vgt_reg_t head,
 
 		cmd_nr++;
 
-		rc = vgt_cmd_parser_exec(&s);
+		rc = vgt_cmd_parser_exec(vgt, &s);
 		if (rc < 0) {
 			vgt_err("cmd parser error\n");
 			break;
