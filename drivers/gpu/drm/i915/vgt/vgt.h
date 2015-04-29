@@ -898,7 +898,8 @@ typedef struct {
 	bool gm_first_cached;
 	uint32_t *saved_context_save_area;
 	struct vgt_vgtt_info gtt_saved;
-	struct task_struct *checkpoint_thread;
+	struct task_struct *request_thread;
+	struct task_struct *thread;
 	bool track_mmio;
 } vgt_ha_t;
 
@@ -2966,6 +2967,11 @@ static inline unsigned long hypervisor_g2m_pfn(struct vgt_device *vgt,
 static inline int hypervisor_pause_domain(struct vgt_device *vgt)
 {
 	return vgt_pkdm->pause_domain(vgt->vm_id);
+}
+
+static inline int hypervisor_unpause_domain(struct vgt_device *vgt)
+{
+	return vgt_pkdm->unpause_domain(vgt->vm_id);
 }
 
 static inline int hypervisor_shutdown_domain(struct vgt_device *vgt)

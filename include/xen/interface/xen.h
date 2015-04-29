@@ -77,6 +77,7 @@
 #define __HYPERVISOR_hvm_op               34
 #define __HYPERVISOR_domctl               36
 #define __HYPERVISOR_tmem_op              38
+#define __HYPERVISOR_gpu_checkpoint_op    39
 
 /* Architecture-specific hypercall definitions. */
 #define __HYPERVISOR_arch_0               48
@@ -794,6 +795,7 @@ DEFINE_GUEST_HANDLE_STRUCT(xen_domctl_getdomaininfo);
 
 #define XEN_DOMCTL_INTERFACE_VERSION 0x0000000a
 #define XEN_DOMCTL_pausedomain                    3
+#define XEN_DOMCTL_unpausedomain                  4
 #define XEN_DOMCTL_getdomaininfo                  5
 #define XEN_DOMCTL_memory_mapping                 39
 #define XEN_DOMCTL_iomem_permission               20

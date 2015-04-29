@@ -566,6 +566,8 @@ static bool vgt_initialize_platform(struct pgt_device *pdev)
 		if (IS_BDWPLUS(pdev))
 			pdev->enable_execlist = 1;
 	}
+	if (pdev->enable_ppgtt)
+		vgt_info("XXH: ppgtt enabled \n");
 
 	pdev->max_engines = 3;
 	pdev->ring_mmio_base[RING_BUFFER_RCS] = _REG_RCS_TAIL;
@@ -1122,6 +1124,7 @@ int vgt_reset_device(struct pgt_device *pdev)
 
 	spin_lock_irqsave(&pdev->lock, flags);
 
+	vgt_info("XXH: before reset run queue count: %d\n", vgt_nr_in_runq(pdev));
 	list_for_each_safe(pos, n, &pdev->rendering_runq_head) {
 		vgt = list_entry(pos, struct vgt_device, list);
 
@@ -1153,6 +1156,25 @@ int vgt_reset_device(struct pgt_device *pdev)
 	vgt_put_irq_lock(pdev, flags);
 
 	do_device_reset(pdev);
+
+	/*list_for_each_safe(pos, n, &pdev->rendering_idleq_head) {
+		vgt = list_entry(pos, struct vgt_device, list);
+
+		if (vgt->vm_id) {
+			int bit;
+			clear_bit(WAIT_RESET, &vgt->reset_flags);
+			vgt_reset_virtual_states(vgt, 0xff);
+			for_each_set_bit(bit, &vgt->enabled_rings_before_reset,
+					sizeof(vgt->enabled_rings_before_reset)) {
+				vgt_info("VM %d: re-enable ring %d after per-engine reset.\n",
+						vgt->vm_id, bit);
+				vgt_enable_ring(vgt, bit);
+			}
+
+			vgt->enabled_rings_before_reset = 0;
+			vgt->last_reset_time = get_seconds();
+		}
+	}*/
 
 	vgt_info("Restart VGT context switch.\n");
 

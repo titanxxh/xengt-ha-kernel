@@ -914,9 +914,13 @@ static const struct file_operations vgt_el_context_fops = {
 static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 {
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
+	vgt_ha_t *ha = &(vgt->ha);
 
 	seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
-	seq_printf(m, "last_changed_pages_cnt=%lu\n", vgt->ha.last_changed_pages_cnt);
+	seq_printf(m, "last_changed_pages_cnt=%lu\n", ha->last_changed_pages_cnt);
+	seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
+	seq_printf(m, "inc enabled %s\n", ha->incremental ? "yes" : "no");
+	seq_printf(m, "ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");
 	return 0;
 }
 
@@ -952,7 +956,13 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 		vgt->ha.restore_request = 1;
 		vgt_info("XXH: ha restore request set\n");
 	} else if (!strncmp(buf, "nrrunq", 6)) {
+		struct vgt_device *vgt2;
+		struct list_head *pos, *n;
 		vgt_info("run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+		list_for_each_safe(pos, n, &vgt->pdev->rendering_runq_head) {
+			vgt2 = list_entry(pos, struct vgt_device, list);
+			vgt_info("vm %d is in run queue\n", vgt2->vm_id);
+		}
 		vgt_info("idle queue count: %d\n", vgt_nr_in_idleq(vgt->pdev));
 	} else if (!strncmp(buf, "vrings", 6)) {
 		int i;

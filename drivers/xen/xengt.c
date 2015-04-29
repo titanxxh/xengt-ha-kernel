@@ -129,6 +129,22 @@ static int xen_pause_domain(int vm_id)
 	return rc;
 }
 
+static int xen_unpause_domain(int vm_id)
+{
+	int rc;
+	struct xen_domctl domctl;
+
+	domctl.domain = vm_id;
+	domctl.cmd = XEN_DOMCTL_unpausedomain;
+	domctl.interface_version = XEN_DOMCTL_INTERFACE_VERSION;
+
+	rc = HYPERVISOR_domctl(&domctl);
+	if (rc != 0)
+		printk("HYPERVISOR_domctl unpausedomain fail with %d!\n", rc);
+
+	return rc;
+}
+
 static int xen_shutdown_domain(int vm_id)
 {
 	int rc;
@@ -1075,6 +1091,7 @@ static bool xen_write_va(struct vgt_device *vgt, void *va, void *val,
 static struct kernel_dm xen_kdm = {
 	.g2m_pfn = xen_g2m_pfn,
 	.pause_domain = xen_pause_domain,
+	.unpause_domain = xen_unpause_domain,
 	.shutdown_domain = xen_shutdown_domain,
 	.map_mfn_to_gpfn = xen_map_mfn_to_gpfn,
 	.set_trap_area = xen_set_trap_area,
