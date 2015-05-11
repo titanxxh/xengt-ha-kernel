@@ -21,6 +21,7 @@
 #define _VGT_HYPERCALL_H_
 
 struct guest_page;
+struct ha_guest_page;
 struct vgt_device;
 struct kernel_dm {
 	unsigned long (*g2m_pfn)(int vm_id, unsigned long g_pfn);
@@ -30,6 +31,8 @@ struct kernel_dm {
 	int (*map_mfn_to_gpfn)(int vm_id, unsigned long gpfn,
 		unsigned long mfn, int nr, int map);
 	int (*set_trap_area)(struct vgt_device *vgt, uint64_t start, uint64_t end, bool map);
+	bool (*ha_set_wp_pages)(struct vgt_device *vgt, struct ha_guest_page *p);
+	bool (*ha_unset_wp_pages)(struct vgt_device *vgt, struct ha_guest_page *p);
 	bool (*set_wp_pages)(struct vgt_device *vgt, struct guest_page *p);
 	bool (*unset_wp_pages)(struct vgt_device *vgt, struct guest_page *p);
 	int (*check_host)(void);

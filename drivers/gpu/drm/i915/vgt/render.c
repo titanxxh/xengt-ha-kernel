@@ -1895,70 +1895,138 @@ bool vgt_render_init(struct pgt_device *pdev)
 
 extern struct vgt_device *vgt_dom0;
 
+void vgt_ha_restore_dummy_gm(struct vgt_device *vgt)
+{
+	char *start;
+	void *va;
+	start = (char *)vgt->ha.dummy_gm;
+	va = hypervisor_gpa_to_va(vgt, 0);
+	memcpy(va, start, 1 << PAGE_SHIFT); 
+	va = hypervisor_gpa_to_va(vgt, vgt->ha.dummy_page_gfn << PAGE_SHIFT);
+	memcpy(va, start + (1 << PAGE_SHIFT), 1 << PAGE_SHIFT); 
+}
+
 int vgt_ha_restore_gtt_gm(struct vgt_device *vgt)
 {
-	uint32_t i, low_frame_cnt;
-	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	uint32_t i, cnt = 0;
+	u64 cost;
 	void *va;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	struct hlist_node *n;
+	ha_guest_page_t *gp;
 	cycles_t t0, t1;
 
 	printk("XXH restore gtt & gm start\n");
 	t0 = vgt_get_cycles();
 	memcpy(mm->virtual_page_table, vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->page_table_entry_size);
-	for (i = 0; i < vgt_aperture_sz(vgt) >> PAGE_SHIFT; i++)
-	{
-		gma = low_base + (i << PAGE_SHIFT);
-		va = vgt_gma_to_va(mm, gma);
-		memcpy(va, (char *)vgt->ha.saved_gm + (i << PAGE_SHIFT), 1 << PAGE_SHIFT);
-	}
-	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
-	for (i = 0; i <  vgt_hidden_gm_sz(vgt) >> PAGE_SHIFT; i++)
-	{
-		gma = high_base + (i << PAGE_SHIFT);
-		va = vgt_gma_to_va(mm, gma);
-		memcpy(va, (char *)vgt->ha.saved_gm + ((low_frame_cnt + i) << PAGE_SHIFT), 1 << PAGE_SHIFT);
+	vgt_ha_restore_dummy_gm(vgt);
+	hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node) {
+		va = vgt_gma_to_va(mm, vgt_ha_ha_index_to_gma(vgt, gp->offset));
+		memcpy(va, (char *)vgt->ha.saved_gm + (gp->offset << PAGE_SHIFT), 1 << PAGE_SHIFT);
+		cnt++;
 	}
 	t1 = vgt_get_cycles();
 	cost = t1 - t0;
-	printk("XXH restore mem cost time %lld\n", cost);
+	printk("XXH restore mem cost time %lld total pages: %d\n", cost, cnt);
 	return 0;
+}
+
+bool ha_guest_page_write_protection_handler(void *gp, uint64_t pa, void *p_data, int bytes)
+{
+	ha_guest_page_t *gpt = (ha_guest_page_t *)gp;
+	struct vgt_device *vgt = gpt->vgt;
+	void *va;
+	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
+	bool ret;
+
+	bitmap_set(bitmap, gpt->offset, 1);
+	va = hypervisor_gpa_to_va(vgt, pa);
+	vgt_err("XXH: wp handler vm %d pa %llx va %llx data %llx bytes %d\n", vgt->vm_id, pa, (u64)va, *(u64 *)p_data, bytes);
+	ret = hypervisor_write_va(vgt, va, p_data, bytes, 1);
+	if (!ret)
+		vgt_err("XXH: wp handler vm %d pa %llx data %llx\n", vgt->vm_id, pa, *(u64 *)p_data);
+	return true;
+}
+EXPORT_SYMBOL(ha_guest_page_write_protection_handler);
+
+void vgt_ha_init_guest_pages(struct vgt_device *vgt)
+{
+	u64 cost, gma;
+	uint64_t gfn;
+	uint32_t i, dup = 0;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	ha_guest_page_t *guest_page;
+	struct hlist_node *n;
+	ha_guest_page_t *gp;
+	cycles_t t0, t1;
+
+	t0 = vgt_get_cycles();
+	hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node)
+		vgt_ha_clean_guest_page(vgt, gp);
+	printk("XXH: init guest pages hashtable\n");
+	atomic_set(&vgt->ha.n_write_protected_guest_page, 0);
+	for (i = 0; i < vgt->ha.saved_gm_size >> PAGE_SHIFT; i++) {
+		gma = vgt_ha_ha_index_to_gma(vgt, i);
+		gfn = vgt_gma_to_gpa(mm, gma) >> PAGE_SHIFT;
+		if (gfn == 0)
+			printk("XXH gfn=0 gma %llx index %x\n", gma, i);
+		if ((guest_page = vgt_ha_find_guest_page(vgt, gfn))) {
+			atomic_inc(&guest_page->ref);
+			dup++;
+		}
+		else {
+			guest_page = &vgt->ha.guest_pages[i];
+			vgt_ha_init_guest_page(vgt, guest_page, gfn, ha_guest_page_write_protection_handler, i);
+		}
+	}
+	hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node) {
+		int ref = atomic_read(&gp->ref);
+		if (ref > 2) {
+			vgt->ha.dummy_page_gfn = gp->gfn;
+			printk("XXH: dummy page gfn %lx count %d\n", gp->gfn, ref);
+		}
+	}
+	guest_page = vgt_ha_find_guest_page(vgt, 0);
+	vgt_ha_clean_guest_page(vgt, guest_page);
+	guest_page = vgt_ha_find_guest_page(vgt, vgt->ha.dummy_page_gfn);
+	vgt_ha_clean_guest_page(vgt, guest_page);
+	t1 = vgt_get_cycles();
+	cost = t1 - t0;
+	printk("XXH: dup page %d total page %lu\n", dup, vgt->ha.guest_page_cnt);
 }
 
 int vgt_ha_save_entire_gm(struct vgt_device *vgt)
 {
-	uint32_t i, low_frame_cnt;
-	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	uint32_t i, cnt = 0;
+	u64 cost;
 	void *va;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	struct hlist_node *n;
+	ha_guest_page_t *gp;
 	cycles_t t0, t1;
 
 	t0 = vgt_get_cycles();
-	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
-	for (i = 0; i < low_frame_cnt; i++)
-	{
-		gma = low_base + (i << PAGE_SHIFT);
-		va = vgt_gma_to_va(mm, gma);
-		memcpy((char *)vgt->ha.saved_gm + (i << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+	if (!vgt->ha.guest_pages_initialized) {
+		vgt_ha_init_guest_pages(vgt);
+		vgt->ha.guest_pages_initialized = true;
 	}
-	for (i = 0; i <  vgt_hidden_gm_sz(vgt) >> PAGE_SHIFT; i++)
-	{
-		gma = high_base + (i << PAGE_SHIFT);
-		va = vgt_gma_to_va(mm, gma);
-		memcpy((char *)vgt->ha.saved_gm + ((low_frame_cnt + i) << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+	hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node) {
+		va = vgt_gma_to_va(mm, vgt_ha_ha_index_to_gma(vgt, gp->offset));
+		memcpy((char *)vgt->ha.saved_gm + (gp->offset << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
+		cnt++;
 	}
 	if (vgt->ha.incremental)
 		vgt->ha.gm_first_cached = true;
 	t1 = vgt_get_cycles();
 	cost = t1 - t0;
-//	printk("XXH save entire gm cost %lld total pages: %d\n", cost, i + low_frame_cnt);
+	printk("XXH save entire gm cost %lld total pages: %d\n", cost, cnt);
 	return 0;
 }
 
 int vgt_ha_save_partial_gm(struct vgt_device *vgt)
 {
 	int pos, changes = 0;
-	u64 cost, gma, low_base = vgt_visible_gm_base(vgt), high_base = vgt_hidden_gm_base(vgt);
+	u64 cost, gma;
 	uint32_t low_frame_cnt;
 	void *va;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
@@ -1966,41 +2034,57 @@ int vgt_ha_save_partial_gm(struct vgt_device *vgt)
 
 	t0 = vgt_get_cycles();
 	low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
-	for_each_set_bit(pos, vgt->ha.saved_gm_bitmap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
-	{
-		changes ++;
-		if (pos < low_frame_cnt)
-			gma = low_base + (pos << PAGE_SHIFT);
-		else
-			gma = high_base + ((pos - low_frame_cnt) << PAGE_SHIFT);
+	for_each_set_bit(pos, vgt->ha.saved_gm_bitmap, vgt->ha.saved_gm_size >> PAGE_SHIFT) {
+		changes++;
+		gma = vgt_ha_ha_index_to_gma(vgt, pos);
 		va = vgt_gma_to_va(mm, gma);
 		memcpy((char *)vgt->ha.saved_gm + (pos << PAGE_SHIFT), va, 1 << PAGE_SHIFT);
 	}
 	t1 = vgt_get_cycles();
 	cost = t1 - t0;
 	vgt->ha.last_changed_pages_cnt = changes;
-//	printk("XXH save partial gm cost %lld total pages: %d\n", cost, changes);
+	printk("XXH save partial gm cost %lld total pages: %d\n", cost, changes);
 	return 0;
+}
+
+void vgt_ha_save_dummy_gm(struct vgt_device *vgt)
+{
+	char *start;
+	void *va;
+	start = (char *)vgt->ha.dummy_gm;
+	va = hypervisor_gpa_to_va(vgt, 0);
+	memcpy(start, va, 1 << PAGE_SHIFT); 
+	va = hypervisor_gpa_to_va(vgt, vgt->ha.dummy_page_gfn << PAGE_SHIFT);
+	memcpy(start + (1 << PAGE_SHIFT), va, 1 << PAGE_SHIFT); 
 }
 
 int vgt_ha_save_gtt_gm(struct vgt_device *vgt)
 {
-	int ret;
+	int ret, i;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	struct hlist_node *n;
+	ha_guest_page_t *gp;
 
 	flush_cache_all();
 	//vgt_info("XXH: saving gtt & gm\n");
-	//TODO: both virtual_page_table and shadow_page_table need copy?
+	//TODO: both virtual_page_table and shadow_page_table need copy? there is no shadow now
 	memcpy(vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->virtual_page_table, mm->page_table_entry_size);
-	if (!vgt->ha.incremental || !vgt->ha.gm_first_cached)
-	{
+	vgt_ha_save_dummy_gm(vgt);
+	if (!vgt->ha.incremental || !vgt->ha.gm_first_cached) {
 		ret = vgt_ha_save_entire_gm(vgt);
 	}
-	else
-	{
+	else {
 		ret = vgt_ha_save_partial_gm(vgt);
 	}
+	if (vgt->ha.incremental) {
+		hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node) {
+			if (gp->gfn != vgt->ha.dummy_page_gfn && gp->gfn)
+				if (!hypervisor_ha_set_wp_pages(vgt, gp))
+					vgt_err("XXH: ha set wp failed gfn %lx\n", gp->gfn);
+		}
+	}
 	bitmap_clear(vgt->ha.saved_gm_bitmap, 0, vgt->ha.saved_gm_size >> PAGE_SHIFT);
+	//vgt->ha.last_changed_pages_cnt = 0;
 	return ret;
 }
 
@@ -2030,19 +2114,16 @@ void vgt_ha_save_context_save_area(struct vgt_device *vgt, int i)
 	memcpy((char *)vgt->ha.saved_context_save_area + offset, v_aperture(pdev, rb->context_save_area), SZ_CONTEXT_AREA_PER_RING);
 }
 
-int xxh_debug;
-EXPORT_SYMBOL(xxh_debug);
-
 int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 {
 	struct pgt_device *pdev = vgt->pdev;
 	/*int cpu;
 	int i = 0;*/
-	vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
+	//vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
 	vgt->ha.checkpoint_id++;
 	//vgt_lock_dev(pdev, cpu);
 	if (vgt != current_render_owner(pdev)) {
-		vgt_info("XXH: not current_render_owner! can start save now\n");
+		//vgt_info("XXH: not current_render_owner! can start save now\n");
 		vgt_ha_save(vgt);
 		//we should remove domu vgt from queue & reset gpu & add it back here
 		/*for (i = 0; i < pdev->max_engines; i++) {
@@ -2061,9 +2142,8 @@ int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 		//vgt_unlock_dev(pdev, cpu);
 	}
 	else {
-		vgt_info("XXH: WHY INTO HERE?\n");
+		vgt_err("XXH: WHY INTO HERE?\n");
 	}
-	xxh_debug = 0;
 	/*pdev->next_sched_vgt = vgt;
 	vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);*/
 	return 0;
@@ -2099,17 +2179,10 @@ int vgt_ha_request_thread(void *priv)
 			}
 			vgt_info("%d tried until not current_render_owner!\n", i);
 			vgt_ha_create_checkpoint(vgt);
-			ret = hypervisor_unpause_domain(vgt);
+			//ret = hypervisor_unpause_domain(vgt);
 		}
 		if (ha->save_request) {
-			vgt->ha.save_request = 0;
 			ret = hypervisor_pause_domain(vgt);
-			/*_hypercall2(long, gpu_checkpoint_op, 0, vgt->vm_id);
-			while (!(ret = _hypercall2(long, gpu_checkpoint_op, 2, vgt->vm_id))) {
-				vgt_info("XXH: domu not paused yet. ret %d\n", ret);
-				if (++i > 100) break;
-				msleep(5);
-			}*/
 			if (vgt == current_render_owner(pdev)) {
 				pdev->next_sched_vgt = vgt_dom0;
 				vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
@@ -2118,17 +2191,28 @@ int vgt_ha_request_thread(void *priv)
 				i++;
 				msleep(5);
 			}
-			vgt_info("%d tried until not current_render_owner!\n", i);
+			//vgt_info("%d tried until not current_render_owner!\n", i);
+
+			//TODO remove following test code
+			/*memcpy(vgt->ha.saved_gm_bitmap_swap, vgt->ha.saved_gm_bitmap, vgt->ha.saved_gm_size >> PAGE_SHIFT);
+			i = 0;
+			for_each_set_bit(pos, vgt->ha.saved_gm_bitmap_swap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
+				i++;
+			vgt_info("XXH: bitmap bits changed %d\n", i);
+			bitmap_clear(vgt->ha.saved_gm_bitmap, 0, vgt->ha.saved_gm_size >> PAGE_SHIFT);*/
+
 			vgt_ha_create_checkpoint(vgt);
-			//_hypercall2(long, gpu_checkpoint_op, 1, vgt->vm_id);
+
+			vgt->ha.save_request = 0;
 			ret = hypervisor_unpause_domain(vgt);
 		}
 		if (ha->restore_request) {
-			vgt_ha_restore(vgt);
+			//vgt_ha_restore(vgt);
 			/*list_del(&vgt->list);
 			list_add(&vgt->list, &pdev->rendering_runq_head);*/
 			pdev->next_sched_vgt = vgt;
 			vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+			ret = hypervisor_unpause_domain(vgt);
 		}
 		continue;
 	}
@@ -2160,7 +2244,7 @@ bool vgt_ha_save(struct vgt_device *vgt)
 {
 	struct pgt_device *pdev = vgt->pdev;
 	int i;
-	vgt_info("XXH: start ha save\n");
+	//vgt_info("XXH: start ha save\n");
 	vgt->ha.saving = 1;
 	vgt_ha_rendering_save_mmio(vgt, false);
 	for (i = 0; i < pdev->max_engines; i++) {
@@ -2352,9 +2436,7 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 		vgt_ppgtt_switch(next);
 
 	if (prev->vm_id == 0 && next->ha.restore_request) {
-		vgt_info("XXH: restore finishied. hypercall to unpause domainU");
 		next->ha.restore_request = 0;
-		//_hypercall2(long, gpu_checkpoint_op, 1, next->vm_id);
 	}
 
 	/* STEP-6: ctx switch ends, and then kicks of new tail */

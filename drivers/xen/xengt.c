@@ -423,6 +423,49 @@ static struct vm_struct *xen_map_iopage(struct vgt_device *vgt)
 	return xen_remap_domain_mfn_range_in_kernel(ioreq_pfn, 1, vgt->vm_id);
 }
 
+static bool xen_set_ha_guest_page_writeprotection(struct vgt_device *vgt,
+		ha_guest_page_t *guest_page)
+{
+	int r;
+
+	if (guest_page->writeprotection)
+		return true;
+
+	r = hvm_wp_page_to_ioreq_server(vgt, guest_page->gfn, 1);
+	if (r) {
+		vgt_err("ha fail to set write protection.\n");
+		return false;
+	}
+
+	guest_page->writeprotection = true;
+
+	atomic_inc(&vgt->ha.n_write_protected_guest_page);
+
+	return true;
+}
+
+static bool xen_clear_ha_guest_page_writeprotection(struct vgt_device *vgt,
+		ha_guest_page_t *guest_page)
+{
+	int r;
+
+	if (!guest_page->writeprotection)
+		return true;
+
+//TODO check whether writeprotection is set in gtt if not clear this page
+	r = hvm_wp_page_to_ioreq_server(vgt, guest_page->gfn, 0);
+	if (r) {
+		vgt_err("ha fail to clear write protection.\n");
+		return false;
+	}
+
+	guest_page->writeprotection = false;
+
+	atomic_dec(&vgt->ha.n_write_protected_guest_page);
+
+	return true;
+}
+
 static bool xen_set_guest_page_writeprotection(struct vgt_device *vgt,
 		guest_page_t *guest_page)
 {
@@ -1095,6 +1138,8 @@ static struct kernel_dm xen_kdm = {
 	.shutdown_domain = xen_shutdown_domain,
 	.map_mfn_to_gpfn = xen_map_mfn_to_gpfn,
 	.set_trap_area = xen_set_trap_area,
+	.ha_set_wp_pages = xen_set_ha_guest_page_writeprotection,
+	.ha_unset_wp_pages = xen_clear_ha_guest_page_writeprotection,
 	.set_wp_pages = xen_set_guest_page_writeprotection,
 	.unset_wp_pages = xen_clear_guest_page_writeprotection,
 	.check_host = xen_check_host,

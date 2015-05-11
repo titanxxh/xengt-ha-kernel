@@ -2313,22 +2313,11 @@ static void trace_cs_command(struct parser_exec_state *s)
 
 }
 
-static int set_dirty_gm_bitmap(struct vgt_device *vgt, struct parser_exec_state *s)
+int set_dirty_gm_bitmap(struct vgt_device *vgt, struct parser_exec_state *s)
 {
-	unsigned long gma, offset;
 	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
-	//gma should be all possible gma here not ip_gma
-	gma = s->ip_gma;
-	if (h_gm_is_hidden(vgt, gma))
-		offset = (h_gm_hidden_offset(vgt, gma) + vgt_aperture_sz(vgt)) >> PAGE_SHIFT;
-	else if (h_gm_is_visible(vgt, gma))
-		offset = h_gm_visible_offset(vgt, gma) >> PAGE_SHIFT;
-	else//invalid gma
-	{
-		vgt_err("XXH: invalid gma in set_dirty!\n");
-		return -1;
-	}
-	bitmap_set(bitmap, offset, 1);
+	//TODO gma should be all possible gma here not ip_gma
+	bitmap_set(bitmap, vgt_ha_gma_to_ha_index(vgt, s->ip_gma), 1);
 	return 0;
 }
 
@@ -2358,8 +2347,8 @@ static int vgt_cmd_parser_exec(struct vgt_device *vgt, struct parser_exec_state 
 	vgt_cmd_addr_audit_with_bitmap(s, info->addr_bitmap);
 
 	//use s->info to set bit in gm bitmap
-	if (vgt->vm_id)
-		set_dirty_gm_bitmap(vgt, s);
+	/*if (vgt->vm_id)
+		set_dirty_gm_bitmap(vgt, s);*/
 
 	/* Let's keep this logic here. Someone has special needs for dumping
 	 * commands can customize this code snippet.

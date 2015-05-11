@@ -960,7 +960,7 @@ int vgt_hvm_map_aperture (struct vgt_device *vgt, int map)
 	else
 		nr_mfns = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
 
-	printk("%s: domid=%d gfn_s=0x%lx mfn_s=0x%lx nr_mfns=0x%x\n", map==0? "remove_map":"add_map",
+	vgt_info("%s: domid=%d gfn_s=0x%lx mfn_s=0x%lx nr_mfns=0x%x\n", map==0? "remove_map":"add_map",
 		vgt->vm_id, first_gfn, first_mfn, nr_mfns);
 
 	r = hypervisor_map_mfn_to_gpfn(vgt, first_gfn, first_mfn,
@@ -997,6 +997,7 @@ int vgt_hvm_set_trap_area(struct vgt_device *vgt, int map)
 	bar_s &= ~0xF; /* clear the LSB 4 bits */
 	bar_e = bar_s + vgt->state.bar_size[0] - 1;
 
+	vgt_info("XXH: vm %d set trap area %llx %llx map %d\n", vgt->vm_id, bar_s, bar_e, map);
 	return hypervisor_set_trap_area(vgt, bar_s, bar_e, map);
 }
 

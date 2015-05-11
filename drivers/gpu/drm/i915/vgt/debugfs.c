@@ -915,12 +915,24 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 {
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
 	vgt_ha_t *ha = &(vgt->ha);
+	//int pos, changes = 0;
 
 	seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
+	seq_printf(m, "gtt wp pages %d\n", atomic_read(&vgt->gtt.n_write_protected_guest_page));
+	seq_printf(m, "ha wp pages %d\n", atomic_read(&ha->n_write_protected_guest_page));
+	seq_printf(m, "guest pages %ld\n", ha->guest_page_cnt);
 	seq_printf(m, "last_changed_pages_cnt=%lu\n", ha->last_changed_pages_cnt);
+	seq_printf(m, "gtt_changed_entries_cnt=%lu\n", ha->gtt_changed_entries_cnt);
+	/*for_each_set_bit(pos, vgt->ha.saved_gm_bitmap_swap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
+	{
+		seq_printf(m, "%x ", pos);
+		if (++changes % 10 == 0 )
+			seq_printf(m, "\n");
+	}
+	seq_printf(m, "\nbitmap bits changed %d\n", changes);*/
 	seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
 	seq_printf(m, "inc enabled %s\n", ha->incremental ? "yes" : "no");
-	seq_printf(m, "ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");
+	seq_printf(m, "pdev ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");
 	return 0;
 }
 
@@ -947,11 +959,24 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 	} else if (!strncmp(buf, "enable", 6)) {
 		vgt->ha.enabled = !vgt->ha.enabled;
 		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
-	} else if (!strncmp(buf, "inc", 3)) {
-		vgt->ha.incremental = !vgt->ha.incremental;
-		vgt_info("XXH: ha incremental status %d for vgt %d\n", vgt->ha.incremental, vgt->vm_id);
-		if (vgt->ha.incremental)
+		if (!vgt->ha.enabled) {
+			vgt->ha.incremental = false;
+		}
+		else {
+			vgt->ha.incremental = false;
 			vgt->ha.gm_first_cached = false;
+		}
+		vgt->ha.guest_pages_initialized = false;
+	} else if (!strncmp(buf, "inc", 3)) {
+		if (!vgt->ha.enabled) {
+			vgt_info("please enable ha first!\n");
+		}
+		else {
+			vgt->ha.incremental = !vgt->ha.incremental;
+			vgt_info("XXH: ha incremental status %d for vgt %d\n", vgt->ha.incremental, vgt->vm_id);
+			if (vgt->ha.incremental)
+				vgt->ha.gm_first_cached = false;
+		}
 	} else if (!strncmp(buf, "restore", 7)) {
 		vgt->ha.restore_request = 1;
 		vgt_info("XXH: ha restore request set\n");

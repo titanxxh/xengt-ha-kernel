@@ -374,6 +374,7 @@ bool vgt_hvm_write_cfg_space(struct vgt_device *vgt,
 	unsigned int port = addr & 0xffffffff;
 
 	vgt_dbg(VGT_DBG_GENERIC, "vgt_hvm_write_cfg_space %x %d %lx\n", port, bytes, val);
+	//vgt_info("vgt_hvm_write_cfg_space %x %d %lx\n", port, bytes, val);
 	ASSERT(((bytes == 4) && ((port & 3) == 0)) ||
 		((bytes == 2) && ((port & 1) == 0)) || (bytes == 1));
 	vgt_emulate_cfg_write (vgt, port, &val, bytes);

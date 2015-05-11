@@ -277,7 +277,7 @@ int alloc_vm_rsvd_aperture(struct vgt_device *vgt)
 		rb->context_save_area = aperture_2_gm(pdev,
 				rsvd_aperture_alloc(pdev, SZ_CONTEXT_AREA_PER_RING) );
 
-		printk("VM%d Ring%d context_save_area is allocated at gm(%llx)\n", vgt->vm_id, i,
+		vgt_info("VM%d Ring%d context_save_area is allocated at gm(%llx)\n", vgt->vm_id, i,
 				rb->context_save_area);
 		rb->active_vm_context = 0;
 

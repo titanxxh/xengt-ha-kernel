@@ -650,6 +650,21 @@ typedef struct {
 	struct vgt_device *vgt;
 } ppgtt_spt_t;
 
+struct ha_guest_page {
+	struct hlist_node node;
+	int writeprotection;
+	unsigned long gfn;
+	unsigned long offset;
+	guest_page_handler_t *handler;
+	struct vgt_device *vgt;
+	atomic_t ref;
+};
+typedef struct ha_guest_page ha_guest_page_t;
+
+extern bool vgt_ha_init_guest_page(struct vgt_device *vgt, ha_guest_page_t *guest_page,
+		unsigned long gfn, guest_page_handler_t handler, uint32_t offset);
+extern ha_guest_page_t *vgt_ha_find_guest_page(struct vgt_device *vgt, unsigned long gfn);
+extern void vgt_ha_clean_guest_page(struct vgt_device *vgt, ha_guest_page_t *guest_page);
 extern bool vgt_init_guest_page(struct vgt_device *vgt, guest_page_t *guest_page,
 		unsigned long gfn, guest_page_handler_t handler, void *data);
 extern void vgt_clean_guest_page(struct vgt_device *vgt, guest_page_t *guest_page);
@@ -881,6 +896,7 @@ struct gt_port {
 };
 
 typedef struct {
+	uint32_t time;
 	int checkpoint_id;
 	int checkpoint_request;
 	int save_request;
@@ -892,15 +908,25 @@ typedef struct {
 	bool enabled;
 	uint64_t saved_gm_size;
 	uint32_t *saved_gm;
+	uint32_t dummy_gm[2*PAGE_SIZE/sizeof(uint32_t)];
 	unsigned long *saved_gm_bitmap;
+	unsigned long *saved_gm_bitmap_swap;
+	bool guest_pages_initialized;
+	ha_guest_page_t *guest_pages;
+	DECLARE_HASHTABLE(guest_page_hash_table, 10);
+	unsigned long guest_page_cnt;
+	atomic_t n_write_protected_guest_page;
 	unsigned long last_changed_pages_cnt;
+	unsigned long gtt_changed_entries_cnt;
 	bool incremental;
 	bool gm_first_cached;
 	uint32_t *saved_context_save_area;
 	struct vgt_vgtt_info gtt_saved;
 	struct task_struct *request_thread;
 	struct task_struct *thread;
-	bool track_mmio;
+	bool test;
+	unsigned long gtt_dummy_entry_cnt;
+	unsigned long dummy_page_gfn;
 } vgt_ha_t;
 
 struct vgt_device {
@@ -2065,8 +2091,25 @@ static inline uint32_t h2g_gtt_index(struct vgt_device *vgt, uint32_t h_index)
 	return (uint32_t)(h2g_gm(vgt, h_addr) >> GTT_PAGE_SHIFT);
 }
 
+static inline unsigned long vgt_ha_gma_to_ha_index(struct vgt_device *vgt, unsigned long gma)
+{
+	if (h_gm_is_hidden(vgt, gma))
+		return (h_gm_hidden_offset(vgt, gma) + vgt_aperture_sz(vgt)) >> PAGE_SHIFT;
+	else
+		return h_gm_visible_offset(vgt, gma) >> PAGE_SHIFT;
+}
+
+static inline unsigned long vgt_ha_ha_index_to_gma(struct vgt_device *vgt, unsigned long i)
+{
+	unsigned long low_frame_cnt = vgt_aperture_sz(vgt) >> PAGE_SHIFT;
+	if (i < low_frame_cnt)
+		return vgt_visible_gm_base(vgt) + (i << PAGE_SHIFT);
+	else
+		return vgt_hidden_gm_base(vgt) + ((i - low_frame_cnt) << PAGE_SHIFT);
+}
+
 static inline void __REG_WRITE(struct pgt_device *pdev,
-	unsigned long reg, unsigned long val, int bytes)
+		unsigned long reg, unsigned long val, int bytes)
 {
 	int ret;
 
@@ -2798,6 +2841,7 @@ extern bool gtt_emulate_write(struct vgt_device *vgt, unsigned int off,
 #define INVALID_ADDR (~0UL)
 
 extern void* vgt_gma_to_va(struct vgt_mm *mm, unsigned long gma);
+extern unsigned long vgt_gma_to_gpa(struct vgt_mm *mm, unsigned long gma);
 
 
 #define INVALID_MFN	(~0UL)
@@ -2984,7 +3028,6 @@ static inline int hypervisor_map_mfn_to_gpfn(struct vgt_device *vgt,
 {
 	if (vgt_pkdm && vgt_pkdm->map_mfn_to_gpfn)
 		return vgt_pkdm->map_mfn_to_gpfn(vgt->vm_id, gpfn, mfn, nr, map);
-
 	return 0;
 }
 
@@ -2992,6 +3035,16 @@ static inline int hypervisor_set_trap_area(struct vgt_device *vgt,
 	uint64_t start, uint64_t end, bool map)
 {
 	return vgt_pkdm->set_trap_area(vgt, start, end, map);
+}
+
+static inline int hypervisor_ha_set_wp_pages(struct vgt_device *vgt, ha_guest_page_t *p)
+{
+	return vgt_pkdm->ha_set_wp_pages(vgt, p);
+}
+
+static inline int hypervisor_ha_unset_wp_pages(struct vgt_device *vgt, ha_guest_page_t *p)
+{
+	return vgt_pkdm->ha_unset_wp_pages(vgt, p);
 }
 
 static inline int hypervisor_set_wp_pages(struct vgt_device *vgt, guest_page_t *p)

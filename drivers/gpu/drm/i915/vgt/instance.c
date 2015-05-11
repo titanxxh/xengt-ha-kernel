@@ -113,7 +113,7 @@ int vgt_ha_thread(void *priv)
 	vgt_info("XXH: vm %d ha thread start\n", vgt->vm_id);
 	while (true)
 	{
-		msleep(5000);
+		msleep(ha->time);
 		if (kthread_should_stop())
 			return 0;
 		if (!ha->enabled)
@@ -195,6 +195,9 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		vgt->ballooning ? pdev->bar_size[1] : vgt_aperture_sz(vgt);
 	vgt->state.bar_size[2] = pdev->bar_size[2];	/* PIO */
 	vgt->state.bar_size[3] = pdev->bar_size[3];	/* ROM */
+	for (i = 0; i < VGT_BAR_NUM; i++) {
+		vgt_info("XXH: bar %d size %x\n", i, vgt->state.bar_size[i]);
+	}
 
 	/* Set initial configuration space and MMIO space registers. */
 	cfg_space = &vgt->state.cfg_space[0];
@@ -351,6 +354,7 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 
 	ha = &(vgt->ha);
 	if (vgt->vm_id != 0) {
+		ha->time = 1000;
 		ha->checkpoint_id = ha->checkpoint_request = 0;
 		ha->saving = ha->save_request = 0;
 		ha->restoring = ha->restore_request = 0;
@@ -360,11 +364,16 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		ha->saved_gm_size = vp.gm_sz * SIZE_1MB;
 		ha->saved_gm = vzalloc(vgt->ha.saved_gm_size);
 		ha->saved_gm_bitmap = vzalloc(ha->saved_gm_size >> PAGE_SHIFT);
+		ha->saved_gm_bitmap_swap = vzalloc(ha->saved_gm_size >> PAGE_SHIFT);
 		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+		ha->guest_pages_initialized = false;
+		ha->guest_pages = vzalloc(sizeof(ha_guest_page_t) * (ha->saved_gm_size >> PAGE_SHIFT));
+		ha->guest_page_cnt = 0;
+		hash_init(ha->guest_page_hash_table);
 		vgt_info("XXH: backup gm size %llx bitmap size %llx addr %llx\n",
 				(unsigned long long)ha->saved_gm_size, (unsigned long long)ha->saved_gm_size >> PAGE_SHIFT,
 				(unsigned long long)ha->saved_gm);
-		if (!ha->saved_gm || !ha->saved_context_save_area || !ha->saved_gm_bitmap)
+		if (!ha->saved_gm || !ha->saved_context_save_area || !ha->saved_gm_bitmap || !ha->guest_pages)
 			goto err;
 	}
 	vgt_info("XXH creating threads\n");
@@ -403,8 +412,12 @@ err2:
 			vfree(vgt->ha.saved_gm);
 		if (vgt->ha.saved_gm_bitmap)
 			vfree(vgt->ha.saved_gm_bitmap);
+		if (vgt->ha.saved_gm_bitmap_swap)
+			vfree(vgt->ha.saved_gm_bitmap_swap);
 		if (vgt->ha.saved_context_save_area)
 			vfree(vgt->ha.saved_context_save_area);
+		if (vgt->ha.guest_pages)
+			vfree(vgt->ha.guest_pages);
 	}
 	if (vgt->vgt_id >= 0)
 		free_vgt_id(vgt->vgt_id);
@@ -419,6 +432,8 @@ void vgt_release_instance(struct vgt_device *vgt)
 	struct list_head *pos;
 	struct vgt_device *v = NULL;
 	int cpu;
+	struct hlist_node *n;
+	ha_guest_page_t *gp;
 
 	printk("prepare to destroy vgt (%d)\n", vgt->vgt_id);
 
@@ -438,7 +453,11 @@ void vgt_release_instance(struct vgt_device *vgt)
 		wmb();
 		vfree(vgt->ha.saved_gm);
 		vfree(vgt->ha.saved_gm_bitmap);
+		vfree(vgt->ha.saved_gm_bitmap_swap);
 		vfree(vgt->ha.saved_context_save_area);
+		hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node)
+			vgt_ha_clean_guest_page(vgt, gp);
+		vfree(vgt->ha.guest_pages);
 	}
 
 	printk("check render ownership...\n");

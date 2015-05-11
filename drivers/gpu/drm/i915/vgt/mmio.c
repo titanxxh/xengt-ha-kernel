@@ -376,6 +376,18 @@ bool vgt_emulate_write(struct vgt_device *vgt, uint64_t pa,
 
 	t0 = get_cycles();
 
+	if (atomic_read(&vgt->ha.n_write_protected_guest_page)) {
+		ha_guest_page_t *guest_page;
+		guest_page = vgt_ha_find_guest_page(vgt, pa >> PAGE_SHIFT);
+		if (guest_page) {
+			rc = guest_page->handler(guest_page, pa, p_data, bytes);
+			if (!hypervisor_ha_unset_wp_pages(vgt, guest_page))
+				vgt_err("XXH: ha unset wp failed\n");
+			if (!rc)
+				vgt_err("XXH: ha handle wp failed\n");
+			return rc;
+		}
+	}
 	if (atomic_read(&vgt->gtt.n_write_protected_guest_page)) {
 		guest_page_t *guest_page;
 		guest_page = vgt_find_guest_page(vgt, pa >> PAGE_SHIFT);

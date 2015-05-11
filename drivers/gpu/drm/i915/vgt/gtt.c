@@ -497,6 +497,43 @@ static inline gtt_entry_t *ppgtt_spt_set_entry(ppgtt_spt_t *spt,
 	ppgtt_spt_set_entry(spt, spt->shadow_page.vaddr, \
 		spt->shadow_page.type, e, index, false)
 
+bool vgt_ha_init_guest_page(struct vgt_device *vgt, ha_guest_page_t *guest_page,
+		unsigned long gfn, guest_page_handler_t handler, uint32_t offset)
+{
+	INIT_HLIST_NODE(&guest_page->node);
+
+	guest_page->vgt = vgt;
+	guest_page->writeprotection = false;
+	guest_page->gfn = gfn;
+	guest_page->handler = handler;
+	guest_page->offset = offset;
+	atomic_set(&guest_page->ref, 1);
+	vgt->ha.guest_page_cnt++;
+
+	hash_add(vgt->ha.guest_page_hash_table, &guest_page->node, guest_page->gfn);
+
+	return true;
+}
+
+ha_guest_page_t *vgt_ha_find_guest_page(struct vgt_device *vgt, unsigned long gfn)
+{
+	ha_guest_page_t *guest_page;
+
+	hash_for_each_possible(vgt->ha.guest_page_hash_table, guest_page, node, gfn)
+		if (guest_page->gfn == gfn)
+			return guest_page;
+
+	return NULL;
+}
+
+void vgt_ha_clean_guest_page(struct vgt_device *vgt, ha_guest_page_t *guest_page)
+{
+	if(!hlist_unhashed(&guest_page->node))
+		hash_del(&guest_page->node);
+	if (guest_page->writeprotection)
+		hypervisor_ha_unset_wp_pages(vgt, guest_page);
+	vgt->ha.guest_page_cnt--;
+}
 
 bool vgt_init_guest_page(struct vgt_device *vgt, guest_page_t *guest_page,
 		unsigned long gfn, guest_page_handler_t handler, void *data)
@@ -1246,7 +1283,7 @@ static inline bool ppgtt_get_next_level_entry(struct vgt_mm *mm,
 	return true;
 }
 
-static inline unsigned long vgt_gma_to_gpa(struct vgt_mm *mm, unsigned long gma)
+unsigned long vgt_gma_to_gpa(struct vgt_mm *mm, unsigned long gma)
 {
 	struct vgt_device *vgt = mm->vgt;
 	struct pgt_device *pdev = vgt->pdev;
@@ -1421,6 +1458,8 @@ static bool process_ppgtt_root_pointer(struct vgt_device *vgt,
 	return true;
 }
 
+extern bool ha_guest_page_write_protection_handler(void *gp, uint64_t pa, void *p_data, int bytes);
+
 bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	void *p_data, unsigned int bytes)
 {
@@ -1428,9 +1467,13 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	struct vgt_device_info *info = &pdev->device_info;
 	struct vgt_mm *ggtt_mm = vgt->gtt.ggtt_mm;
 	unsigned long g_gtt_index = off >> info->gtt_entry_size_shift;
-	unsigned long gma;
-	gtt_entry_t e, m;
+	unsigned long gma, offset;
+	gtt_entry_t e, m, o;
 	int rc;
+	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
+	unsigned long gfn;
+	struct vgt_gtt_pte_ops *pte_ops = pdev->gtt.pte_ops;
+	ha_guest_page_t *guest_page;
 
 	if (bytes != 4 && bytes != 8)
 		return false;
@@ -1463,6 +1506,34 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	if (e.type != GTT_TYPE_GGTT_PTE)
 		return true;
 
+	ggtt_get_guest_entry(ggtt_mm, &o, g_gtt_index);
+	if (vgt->vm_id && vgt->ha.guest_pages_initialized) {
+		if ((bytes == 4 && o.val32[0]!=e.val32[0]) || (bytes == 8 && o.val64!=e.val64)) {
+			vgt->ha.gtt_changed_entries_cnt++;
+			gfn = pte_ops->get_pfn(&o);
+			if (gfn != vgt->ha.dummy_page_gfn && gfn) {
+				guest_page = vgt_ha_find_guest_page(vgt, gfn);
+				if (guest_page) {
+					if (atomic_dec_and_test(&guest_page->ref))
+						vgt_ha_clean_guest_page(vgt, guest_page);
+				}
+			}
+			gfn = pte_ops->get_pfn(&e);
+			if (gfn != vgt->ha.dummy_page_gfn && gfn) {
+				offset = vgt_ha_gma_to_ha_index(vgt, gma);
+				bitmap_set(bitmap, offset, 1);
+				guest_page = vgt_ha_find_guest_page(vgt, gfn);
+				if (guest_page) {
+					vgt_err("XXH: WHY? dup! but not dummy gtt entry!\n");
+					atomic_inc(&guest_page->ref);
+				}
+				else {
+					guest_page = &vgt->ha.guest_pages[offset];
+					vgt_ha_init_guest_page(vgt, guest_page, gfn, ha_guest_page_write_protection_handler, offset);
+				}
+			}
+		}
+	}
 	ggtt_set_guest_entry(ggtt_mm, &e, g_gtt_index);
 
 	rc = gtt_entry_p2m(vgt, &e, &m);
