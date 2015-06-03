@@ -177,6 +177,8 @@ struct pgt_device default_device = {
 };
 
 struct vgt_device *vgt_dom0;
+struct vgt_device *vgt_saved;
+bool vgt_prepared_for_restoring;
 struct pgt_device *pdev_default = &default_device;
 struct drm_i915_private *dev_priv = NULL;
 DEFINE_PER_CPU(u8, in_vgt);
@@ -795,6 +797,9 @@ static int vgt_initialize(struct pci_dev *dev)
 	vgt_init_sysfs(pdev);
 
 	vgt_init_fb_notify();
+
+	vgt_saved = NULL;
+	vgt_prepared_for_restoring = false;
 
 	printk("vgt_initialize succeeds.\n");
 

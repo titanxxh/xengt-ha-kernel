@@ -79,6 +79,28 @@ static ssize_t vgt_create_instance_store(struct kobject *kobj, struct kobj_attri
 	return rc < 0 ? rc : count;
 }
 
+static ssize_t vgt_ha_ctl_show(struct kobject *kobj, struct kobj_attribute *attr,
+			char *buf)
+{
+	return sprintf(buf,"One vgt instance has been saved: %s\n", vgt_saved ? "YES" : "NO");
+}
+
+static ssize_t vgt_ha_ctl_store(struct kobject *kobj, struct kobj_attribute *attr,
+	const char *buf, size_t count)
+{
+	vgt_info("XXH: %s\n", buf);
+	if (!strncmp(buf, "prepare", 7)) {
+		if (!vgt_prepared_for_restoring) {
+			if (vgt_saved)
+				vgt_prepared_for_restoring = true;
+			else
+				vgt_warn("XXH: no vgt instance saved!\n");
+		} else
+			vgt_warn("XXH: one restoring is running!\n");
+	}
+	return count;
+}
+
 static ssize_t vgt_display_owner_show(struct kobject *kobj, struct kobj_attribute *attr,
 			char *buf)
 {
@@ -134,11 +156,11 @@ static ssize_t vgt_foreground_vm_store(struct kobject *kobj, struct kobj_attribu
 		goto out;
 	}
 
-	if (!__vreg(next_vgt, vgt_info_off(display_ready))) {
+	/*if (!__vreg(next_vgt, vgt_info_off(display_ready))) {
 		printk("VGT %d: Display is not ready.\n", vmid);
 		ret = -EAGAIN;
 		goto out;
-	}
+	}*/
 
 	pdev->next_foreground_vm = next_vgt;
 	vgt_raise_request(pdev, VGT_REQUEST_DPY_SWITCH);
@@ -279,6 +301,8 @@ static ssize_t vgt_virtual_event_trigger(struct kobject *kobj,
 
 static struct kobj_attribute create_vgt_instance_attrs =
 	__ATTR(create_vgt_instance, 0220, NULL, vgt_create_instance_store);
+static struct kobj_attribute ha_ctl_attrs =
+	__ATTR(ha_ctl, 0660, vgt_ha_ctl_show, vgt_ha_ctl_store);
 static struct kobj_attribute display_owner_ctrl_attrs =
 	__ATTR(display_owner, 0660, vgt_display_owner_show, vgt_display_owner_store);
 static struct kobj_attribute foreground_vm_ctrl_attrs =
@@ -301,6 +325,7 @@ static struct kobj_attribute available_res_attrs =
 
 static struct attribute *vgt_ctrl_attrs[] = {
 	&create_vgt_instance_attrs.attr,
+	&ha_ctl_attrs.attr,
 	&display_owner_ctrl_attrs.attr,
 	&foreground_vm_ctrl_attrs.attr,
 	&virtual_event_attrs.attr,

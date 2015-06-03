@@ -352,6 +352,9 @@ static void vgt_save_ringbuffer(struct vgt_device *vgt, int id)
 	/* only head is HW updated */
 	rb->sring.head = VGT_READ_HEAD(pdev, id);
 	rb->vring.head = rb->sring.head;
+	
+	/*if (vgt->vm_id)
+		printk("XXH: ring %d head %x\n", id, rb->sring.head);*/
 }
 
 /* restore ring buffer structures to a empty state (head==tail) */
@@ -588,7 +591,7 @@ vgt_reg_t vgt_gen8_render_regs[] = {
         _REG_BCS_EXECLIST_STATUS,
 };
 
-static void __vgt_ha_rendering_save(struct vgt_device *vgt, int num, vgt_reg_t *regs, bool cur_vgt)
+void __vgt_ha_rendering_save(struct vgt_device *vgt, int num, vgt_reg_t *regs, bool cur_vgt)
 {
 	vgt_reg_t	*sreg, *vreg;	/* shadow regs */
 	int i;
@@ -642,6 +645,9 @@ static void vgt_ha_rendering_save_mmio(struct vgt_device *vgt, bool cur_vgt)
 				ARRAY_NUM(vgt_gen8_render_regs),
 				&vgt_gen8_render_regs[0],
 				cur_vgt);
+	//NOTE here we just save all regs
+	/*memcpy(vgt->state.sReg_cp, vgt->state.sReg, pdev->mmio_size);
+	memcpy(vgt->state.vReg_cp, vgt->state.vReg, pdev->mmio_size);*/
 }
 
 static void __vgt_rendering_save(struct vgt_device *vgt, int num, vgt_reg_t *regs)
@@ -688,14 +694,11 @@ static void vgt_rendering_save_mmio(struct vgt_device *vgt)
 		__vgt_rendering_save(vgt,
 				ARRAY_NUM(vgt_gen8_render_regs),
 				&vgt_gen8_render_regs[0]);
-	/*if ((vgt->ha.enabled && vgt->vm_id && !vgt->ha.force_disable_ha) || vgt->ha.save_request) {
-		vgt_ha_rendering_save_mmio(vgt, true);
-	}*/
 
 	pdev->in_ctx_switch = 0;
 }
 
-static void __vgt_ha_rendering_restore (struct vgt_device *vgt, int num_render_regs, vgt_reg_t *render_regs)
+void __vgt_ha_rendering_restore (struct vgt_device *vgt, int num_render_regs, vgt_reg_t *render_regs)
 {
 	int i;
 
@@ -753,6 +756,9 @@ void vgt_ha_rendering_restore_mmio(struct vgt_device *vgt)
 		__vgt_ha_rendering_restore(vgt, ARRAY_NUM(vgt_render_regs), &vgt_render_regs[0]);
 	else if (IS_IVB(pdev) || IS_HSW(pdev))
 		__vgt_ha_rendering_restore(vgt, ARRAY_NUM(vgt_gen7_render_regs), &vgt_gen7_render_regs[0]);
+	//NOTE here we just restore all regs
+	/*memcpy(vgt->state.sReg, vgt->state.sReg_cp, pdev->mmio_size);
+	memcpy(vgt->state.vReg, vgt->state.vReg_cp, pdev->mmio_size);*/
 }
 
 /*
@@ -1908,26 +1914,26 @@ void vgt_ha_restore_dummy_gm(struct vgt_device *vgt)
 
 int vgt_ha_restore_gtt_gm(struct vgt_device *vgt)
 {
-	uint32_t i, cnt = 0;
 	u64 cost;
-	void *va;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
-	struct hlist_node *n;
-	ha_guest_page_t *gp;
+	/*struct hlist_node *n;
+	uint32_t i, cnt = 0;
+	void *va;
+	ha_guest_page_t *gp;*/
 	cycles_t t0, t1;
 
 	printk("XXH restore gtt & gm start\n");
 	t0 = vgt_get_cycles();
-	memcpy(mm->virtual_page_table, vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->page_table_entry_size);
-	vgt_ha_restore_dummy_gm(vgt);
+	memcpy(mm->virtual_page_table, vgt->ha.saved_gtt, mm->page_table_entry_size);
+	/*vgt_ha_restore_dummy_gm(vgt);
 	hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node) {
 		va = vgt_gma_to_va(mm, vgt_ha_ha_index_to_gma(vgt, gp->offset));
 		memcpy(va, (char *)vgt->ha.saved_gm + (gp->offset << PAGE_SHIFT), 1 << PAGE_SHIFT);
 		cnt++;
-	}
+	}*/
 	t1 = vgt_get_cycles();
 	cost = t1 - t0;
-	printk("XXH restore mem cost time %lld total pages: %d\n", cost, cnt);
+	//printk("XXH restore mem cost time %lld total pages: %d\n", cost, cnt);
 	return 0;
 }
 
@@ -2060,16 +2066,17 @@ void vgt_ha_save_dummy_gm(struct vgt_device *vgt)
 
 int vgt_ha_save_gtt_gm(struct vgt_device *vgt)
 {
-	int ret, i;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
-	struct hlist_node *n;
-	ha_guest_page_t *gp;
+	/*struct hlist_node *n;
+	int ret;
+	int i;
+	ha_guest_page_t *gp;*/
 
 	flush_cache_all();
-	//vgt_info("XXH: saving gtt & gm\n");
-	//TODO: both virtual_page_table and shadow_page_table need copy? there is no shadow now
-	memcpy(vgt->ha.gtt_saved.ggtt_mm->virtual_page_table, mm->virtual_page_table, mm->page_table_entry_size);
-	vgt_ha_save_dummy_gm(vgt);
+	vgt_info("XXH: saving gtt & gm\n");
+	memcpy(vgt->ha.saved_gtt, mm->virtual_page_table, mm->page_table_entry_size);
+	/*now all memory saved by xl save*/
+	/*vgt_ha_save_dummy_gm(vgt);
 	if (!vgt->ha.incremental || !vgt->ha.gm_first_cached) {
 		ret = vgt_ha_save_entire_gm(vgt);
 	}
@@ -2083,9 +2090,9 @@ int vgt_ha_save_gtt_gm(struct vgt_device *vgt)
 					vgt_err("XXH: ha set wp failed gfn %lx\n", gp->gfn);
 		}
 	}
-	bitmap_clear(vgt->ha.saved_gm_bitmap, 0, vgt->ha.saved_gm_size >> PAGE_SHIFT);
+	bitmap_clear(vgt->ha.saved_gm_bitmap, 0, vgt->ha.saved_gm_size >> PAGE_SHIFT);*/
 	//vgt->ha.last_changed_pages_cnt = 0;
-	return ret;
+	return 0;
 }
 
 void vgt_ha_restore_context_save_area(struct vgt_device *vgt, int i)
@@ -2102,14 +2109,6 @@ void vgt_ha_save_context_save_area(struct vgt_device *vgt, int i)
 	struct pgt_device *pdev = vgt->pdev;
 	vgt_state_ring_t *rb = &vgt->rb[i];
 	uint32_t offset = i * SZ_CONTEXT_AREA_PER_RING;
-	/*int j;
-	for (j = 0; j < SZ_CONTEXT_AREA_PER_RING / sizeof(uint32_t); j += sizeof(uint32_t)) {
-		char *ptr = (char *)vgt->ha.saved_context_save_area + offset + j;
-		if (*(uint32_t *)ptr != *(uint32_t *)(v_aperture(pdev, rb->context_save_area) + j)) {
-			printk("context_save_area ring %d offset %d different\n", i, j);
-			break;
-		}
-	}*/
 	//vgt_info("XXH: saving context_save_area %d\n", i);
 	memcpy((char *)vgt->ha.saved_context_save_area + offset, v_aperture(pdev, rb->context_save_area), SZ_CONTEXT_AREA_PER_RING);
 }
@@ -2119,33 +2118,16 @@ int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 	struct pgt_device *pdev = vgt->pdev;
 	/*int cpu;
 	int i = 0;*/
-	//vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
+	vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
 	vgt->ha.checkpoint_id++;
 	//vgt_lock_dev(pdev, cpu);
 	if (vgt != current_render_owner(pdev)) {
-		//vgt_info("XXH: not current_render_owner! can start save now\n");
 		vgt_ha_save(vgt);
-		//we should remove domu vgt from queue & reset gpu & add it back here
-		/*for (i = 0; i < pdev->max_engines; i++) {
-			vgt_disable_ring(vgt, i);
-		}*/
-		/*list_del(&vgt->list);
-		list_add(&vgt->list, &pdev->rendering_idleq_head);*/
-		//vgt_reset_device(pdev);
-		/*list_del(&vgt->list);
-		list_add(&vgt->list, &pdev->rendering_runq_head);*/
-		/*for (i = 0; i < pdev->max_engines; i++) {
-			vgt_enable_ring(vgt, i);
-		}*/
-		//vgt->ha.restore_request = 1;
-		//vgt_ha_restore(vgt);
 		//vgt_unlock_dev(pdev, cpu);
 	}
 	else {
 		vgt_err("XXH: WHY INTO HERE?\n");
 	}
-	/*pdev->next_sched_vgt = vgt;
-	vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);*/
 	return 0;
 }
 
@@ -2160,10 +2142,60 @@ int vgt_ha_request_thread(void *priv)
 	vgt_info("XXH: vm %d ha request thread start\n", vgt->vm_id);
 	while (true)
 	{
-		msleep(15);
+		//msleep(15);
+		ret = wait_event_interruptible(ha->event_wq, ha->request || kthread_should_stop());
 		if (kthread_should_stop())
 			return 0;
-		if (!ha->checkpoint_request && !ha->restore_request && !ha->save_request)
+		if (ret)
+			vgt_warn("ha_checkpoint thread-%d waken up by unexpected signal!\n", vgt->vm_id);
+		if (!ha->request /*&& !freezing(current)*/) {
+			vgt_warn("ha_checkpoint thread-%d waken up by unknown reasons!\n", vgt->vm_id);
+			continue;
+		}
+		if (test_and_clear_bit(VGT_HA_REQUEST_SAVE, (void *)&ha->request)) {
+			ret = hypervisor_pause_domain(vgt);
+			vgt_info("XXH: domu paused ret %d\n", ret);
+			if (vgt == current_render_owner(pdev)) {
+				pdev->next_sched_vgt = vgt_dom0;
+				vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+			}
+			while (vgt == current_render_owner(pdev)) {
+				i++;
+				msleep(5);
+			}
+			vgt_info("%d tried until not current_render_owner!\n", i);
+			hvm_toggle_iorequest_server(vgt, 0);
+			vgt_ha_create_checkpoint(vgt);
+			ret = hypervisor_unpause_domain(vgt);
+			vgt_info("XXH: domu unpaused ret %d\n", ret);
+		}
+		if (test_and_clear_bit(VGT_HA_REQUEST_RESTORE, (void *)&ha->request)) {
+			//ha->restore_request = 1;
+			vgt_ha_restore(vgt);
+			/*pdev->next_sched_vgt = vgt;
+			vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);*/
+		}
+		if (test_and_clear_bit(VGT_HA_REQUEST_CREATE, (void *)&ha->request)) {
+			ret = hypervisor_pause_domain(vgt);
+			vgt_info("XXH: domu paused ret %d\n", ret);
+			if (vgt == current_render_owner(pdev)) {
+				pdev->next_sched_vgt = vgt_dom0;
+				vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+			}
+			while (vgt == current_render_owner(pdev)) {
+				i++;
+				msleep(5);
+			}
+			vgt_info("%d tried until not current_render_owner!\n", i);
+			vgt_ha_create_checkpoint(vgt);
+		}
+		if (test_and_clear_bit(VGT_HA_REQUEST_CONTINUE, (void *)&ha->request)) {
+			ha->restore_request = 1;
+			pdev->next_sched_vgt = vgt;
+			vgt_raise_request(pdev, VGT_REQUEST_CTX_SWITCH);
+			ret = hypervisor_unpause_domain(vgt);
+		}
+		/*if (!ha->checkpoint_request && !ha->restore_request && !ha->save_request)
 			continue;
 		if (ha->checkpoint_request) {
 			vgt->ha.checkpoint_request = 0;
@@ -2180,7 +2212,7 @@ int vgt_ha_request_thread(void *priv)
 			vgt_info("%d tried until not current_render_owner!\n", i);
 			vgt_ha_create_checkpoint(vgt);
 			//ret = hypervisor_unpause_domain(vgt);
-		}
+		}*/
 		if (ha->save_request) {
 			ret = hypervisor_pause_domain(vgt);
 			if (vgt == current_render_owner(pdev)) {
@@ -2244,17 +2276,21 @@ bool vgt_ha_save(struct vgt_device *vgt)
 {
 	struct pgt_device *pdev = vgt->pdev;
 	int i;
-	//vgt_info("XXH: start ha save\n");
+	vgt_info("XXH: start ha save\n");
 	vgt->ha.saving = 1;
+	//NOTE temp solution save vgt info into a temp variable now
+	vgt->ha.saved_for_restore = true;
+	vgt_saved = vgt;
 	vgt_ha_rendering_save_mmio(vgt, false);
 	for (i = 0; i < pdev->max_engines; i++) {
 		vgt_state_ring_t *rb = &vgt->rb[i];
 		vgt_state_ring_t *rb_cp = &vgt->rb_cp[i];
-		//vgt_info("XXH: saving ring %d state\n", i);
 		memcpy(rb_cp, rb, sizeof(vgt_state_ring_t));
 		vgt_ha_save_context_save_area(vgt, i);
+		printk("XXH: ring %d head %x tail %x\n", i, rb->sring.head, rb->sring.tail);
 	}
 	vgt_ha_save_gtt_gm(vgt);
+	vgt_info("XXH: finish ha save\n");
 	vgt->ha.saving = 0;
 	return 0;
 }
@@ -2275,6 +2311,7 @@ bool vgt_ha_restore(struct vgt_device *vgt)
 		vgt_state_ring_t *rb_cp = &vgt->rb_cp[i];
 		memcpy(rb, rb_cp, sizeof(vgt_state_ring_t));
 		vgt_ha_restore_context_save_area(vgt, i);
+		printk("XXH: ring %d head %x tail %x\n", i, rb->sring.head, rb->sring.tail);
 	}
 	vgt_ha_rendering_restore_mmio(vgt);
 	t1 = vgt_get_cycles();
@@ -2283,6 +2320,29 @@ bool vgt_ha_restore(struct vgt_device *vgt)
 	printk("XXH ha restore cost %lld\n", cost);
 	return false;
 }
+
+void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_saved)
+{
+	struct pgt_device *pdev = vgt->pdev;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	int i;
+
+	vgt_info("XXH: copy back data in newly constructed vgt!\n");
+	memcpy(vgt->ha.saved_gtt, vgt_saved->ha.saved_gtt, mm->page_table_entry_size);
+	memcpy((char *)vgt->ha.saved_context_save_area, (char *)vgt_saved->ha.saved_context_save_area, SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+	for (i = 0; i < pdev->max_engines; i++) {
+		vgt_state_ring_t *rb = &vgt->rb_cp[i];
+		vgt_state_ring_t *rb_cp = &vgt_saved->rb_cp[i];
+		memcpy(rb, rb_cp, sizeof(vgt_state_ring_t));
+	}
+	memcpy(vgt->state.sReg_cp, vgt_saved->state.sReg_cp, pdev->mmio_size);
+	memcpy(vgt->state.vReg_cp, vgt_saved->state.vReg_cp, pdev->mmio_size);
+	vgt_prepared_for_restoring = false;
+	//vgt->ha.restore_request = 1;
+	vgt_ha_restore(vgt);
+	vgt_info("after xl restore, run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+}
+EXPORT_SYMBOL(vgt_restore_saved_instance);
 
 bool vgt_do_render_sched(struct pgt_device *pdev)
 {
@@ -2382,13 +2442,6 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 
 	if (next->ha.restore_request)
 		vgt_info("XXH: request to restore\n");
-	/*if (prev->vm_id == 0 && next->ha.restore_request && next->ha.enabled && !next->ha.force_disable_ha) {
-		if (!vgt_ha_restore(next)) {
-			vgt_info("restore succ!\n");
-		}
-		else
-			vgt_info("restore fail!\n");
-	}*/
 
 	if (prev->vm_id == 0 && next->ha.restore_request) {
 		if (!vgt_ha_restore(next)) {
@@ -2403,24 +2456,11 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 
 	/* STEP-2: HW render context switch */
 	for (i=0; i < pdev->max_engines; i++) {
-		/*vgt_state_ring_t *rb = &prev->rb[i];
-		vgt_state_ring_t *rb_cp = &prev->rb_cp[i];*/
 		if (!pdev->ring_buffer[i].need_switch)
-			//goto loopout;
 			continue;
 
 		context_ops->ring_context_switch(pdev, i, prev, next);
-/*loopout:
-		if ((prev->ha.enabled && prev->vm_id && !prev->ha.force_disable_ha) || prev->ha.save_request) {
-			memcpy(rb_cp, rb, sizeof(vgt_state_ring_t));
-			vgt_ha_save_context_save_area(prev, i);
-		}*/
 	}
-
-	/*if ((prev->ha.enabled && prev->vm_id && !prev->ha.force_disable_ha) || prev->ha.save_request) {
-		vgt_ha_save_gtt_gm(prev);
-	}
-	prev->ha.save_request = 0;*/
 
 	/* STEP-3: manually restore render context */
 	vgt_rendering_restore_mmio(next);

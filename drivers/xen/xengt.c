@@ -258,11 +258,13 @@ static int hvm_create_iorequest_server(struct vgt_device *vgt)
 		return r;
 	}
 	info->iosrv_id = arg.id;
+	printk(KERN_ERR "XXH iosrvid %d!\n", info->iosrv_id);
+	//dump_stack();
 
 	return r;
 }
 
-static int hvm_toggle_iorequest_server(struct vgt_device *vgt, bool enable)
+int hvm_toggle_iorequest_server(struct vgt_device *vgt, bool enable)
 {
 	struct vgt_hvm_info *info = vgt->hvm_info;
 	struct xen_hvm_set_ioreq_server_state arg;
@@ -280,6 +282,7 @@ static int hvm_toggle_iorequest_server(struct vgt_device *vgt, bool enable)
 
        return r;
 }
+EXPORT_SYMBOL(hvm_toggle_iorequest_server);
 
 static int hvm_get_ioreq_pfn(struct vgt_device *vgt, uint64_t *value)
 {
@@ -963,6 +966,8 @@ static irqreturn_t vgt_hvm_io_req_handler(int irq, void* dev)
 		/*opps, irq is not the registered one*/
 		vgt_info("Received a IOREQ w/o vcpu target\n");
 		vgt_info("Possible a false request from event binding\n");
+		for(vcpu=0; vcpu < info->nr_vcpu; vcpu++)
+			printk("XXH: irq %d vm %d evtchn_irq[%d] %d\n", irq, vgt->vm_id, vcpu, info->evtchn_irq[vcpu]);
 		return IRQ_NONE;
 	}
 
@@ -1058,6 +1063,7 @@ static int xen_hvm_init(struct vgt_device *vgt)
 			goto err;
 		}
 		info->evtchn_irq[vcpu] = irq;
+		printk("XXH: evtchn_irq[%d] = irq %d\n", vcpu, irq);
 	}
 
 	thread = kthread_run(vgt_emulation_thread, vgt,

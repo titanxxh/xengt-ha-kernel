@@ -125,6 +125,7 @@ int vgt_ha_thread(void *priv)
 }
 
 extern int vgt_ha_request_thread(void *);
+extern void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_saved);
 
 /*
  * priv: VCPU ?
@@ -292,11 +293,11 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		vgt_err("fail to initialize vgt vgtt.\n");
 		goto err2;
 	}
-	if (vgt->vm_id != 0)
+	/*if (vgt->vm_id != 0)
 		if (!vgt_init_vgtt(vgt, &vgt->ha.gtt_saved)) {
 			vgt_err("fail to initialize vgt gtt_saved.\n");
 			goto err2;
-		}
+		}*/
 
 	if (vgt->vm_id != 0){
 		/* HVM specific init */
@@ -354,6 +355,8 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 
 	ha = &(vgt->ha);
 	if (vgt->vm_id != 0) {
+		ha->saved_for_restore = false;
+		ha->request = 0;
 		ha->time = 1000;
 		ha->checkpoint_id = ha->checkpoint_request = 0;
 		ha->saving = ha->save_request = 0;
@@ -361,11 +364,17 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		ha->enabled = false;
 		ha->incremental = false;
 		ha->gm_first_cached = false;
-		ha->saved_gm_size = vp.gm_sz * SIZE_1MB;
+		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+		ha->saved_gtt = vzalloc(vgt->gtt.ggtt_mm->page_table_entry_size);
+		if (!ha->saved_context_save_area || !ha->saved_gtt)
+			goto err;
+		vgt_info("XXH: backup gtt size %llx context_area size %llx\n",
+				(unsigned long long)vgt->gtt.ggtt_mm->page_table_entry_size,
+				(unsigned long long)SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+		/*ha->saved_gm_size = vp.gm_sz * SIZE_1MB;
 		ha->saved_gm = vzalloc(vgt->ha.saved_gm_size);
 		ha->saved_gm_bitmap = vzalloc(ha->saved_gm_size >> PAGE_SHIFT);
 		ha->saved_gm_bitmap_swap = vzalloc(ha->saved_gm_size >> PAGE_SHIFT);
-		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
 		ha->guest_pages_initialized = false;
 		ha->guest_pages = vzalloc(sizeof(ha_guest_page_t) * (ha->saved_gm_size >> PAGE_SHIFT));
 		ha->guest_page_cnt = 0;
@@ -374,24 +383,29 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 				(unsigned long long)ha->saved_gm_size, (unsigned long long)ha->saved_gm_size >> PAGE_SHIFT,
 				(unsigned long long)ha->saved_gm);
 		if (!ha->saved_gm || !ha->saved_context_save_area || !ha->saved_gm_bitmap || !ha->guest_pages)
+			goto err;*/
+		vgt_info("XXH creating threads\n");
+		thread = NULL;
+		init_waitqueue_head(&ha->event_wq);
+		thread = kthread_run(vgt_ha_request_thread, vgt, "vgt_ha_request:%d", vgt->vm_id);
+		if(IS_ERR(thread))
+		{
+			vgt_info("XXH creating ha request thread failed\n");
 			goto err;
+		}
+		ha->request_thread = thread;
+		/*ha->thread = NULL;
+		thread = kthread_run(vgt_ha_thread, vgt, "vgt_ha:%d", vgt->vm_id);
+		if(IS_ERR(thread))
+		{
+			vgt_info("XXH creating ha thread failed\n");
+			goto err;
+		}
+		ha->thread = thread;*/
+		if (vgt_prepared_for_restoring) {
+			vgt_restore_saved_instance(vgt, vgt_saved);
+		}
 	}
-	vgt_info("XXH creating threads\n");
-	thread = NULL;
-	thread = kthread_run(vgt_ha_request_thread, vgt, "vgt_ha_request:%d", vgt->vm_id);
-	if(IS_ERR(thread))
-	{
-		vgt_info("XXH creating ha request thread failed\n");
-		goto err;
-	}
-	ha->request_thread = thread;
-	thread = kthread_run(vgt_ha_thread, vgt, "vgt_ha:%d", vgt->vm_id);
-	if(IS_ERR(thread))
-	{
-		vgt_info("XXH creating ha thread failed\n");
-		goto err;
-	}
-	ha->thread = thread;
 	return 0;
 err:
 	vgt_clean_vgtt(vgt);
@@ -408,16 +422,18 @@ err2:
 	if (vgt->ha.request_thread)
 		kthread_stop(vgt->ha.request_thread);
 	if (vgt->vm_id != 0) {
-		if (vgt->ha.saved_gm)
+		/*if (vgt->ha.saved_gm)
 			vfree(vgt->ha.saved_gm);
 		if (vgt->ha.saved_gm_bitmap)
 			vfree(vgt->ha.saved_gm_bitmap);
 		if (vgt->ha.saved_gm_bitmap_swap)
 			vfree(vgt->ha.saved_gm_bitmap_swap);
+		if (vgt->ha.guest_pages)
+			vfree(vgt->ha.guest_pages);*/
 		if (vgt->ha.saved_context_save_area)
 			vfree(vgt->ha.saved_context_save_area);
-		if (vgt->ha.guest_pages)
-			vfree(vgt->ha.guest_pages);
+		if(ha->saved_gtt)
+			vfree(ha->saved_gtt);
 	}
 	if (vgt->vgt_id >= 0)
 		free_vgt_id(vgt->vgt_id);
@@ -432,8 +448,9 @@ void vgt_release_instance(struct vgt_device *vgt)
 	struct list_head *pos;
 	struct vgt_device *v = NULL;
 	int cpu;
-	struct hlist_node *n;
-	ha_guest_page_t *gp;
+	vgt_ha_t *ha = &(vgt->ha);
+	/*struct hlist_node *n;
+	ha_guest_page_t *gp;*/
 
 	printk("prepare to destroy vgt (%d)\n", vgt->vgt_id);
 
@@ -449,15 +466,16 @@ void vgt_release_instance(struct vgt_device *vgt)
 	if (vgt->ha.request_thread)
 		kthread_stop(vgt->ha.request_thread);
 	if (vgt->vm_id != 0) {
-		vgt->ha.force_disable_ha = 1;
-		wmb();
-		vfree(vgt->ha.saved_gm);
+		/*vfree(vgt->ha.saved_gm);
 		vfree(vgt->ha.saved_gm_bitmap);
 		vfree(vgt->ha.saved_gm_bitmap_swap);
-		vfree(vgt->ha.saved_context_save_area);
 		hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node)
 			vgt_ha_clean_guest_page(vgt, gp);
-		vfree(vgt->ha.guest_pages);
+		vfree(vgt->ha.guest_pages);*/
+		if (!ha->saved_for_restore) {
+			vfree(ha->saved_gtt);
+			vfree(ha->saved_context_save_area);
+		}
 	}
 
 	printk("check render ownership...\n");
@@ -549,10 +567,15 @@ void vgt_release_instance(struct vgt_device *vgt)
 	free_vm_rsvd_aperture(vgt);
 	vfree(vgt->state.vReg);
 	vfree(vgt->state.sReg);
-	vfree(vgt->state.vReg_cp);
-	vfree(vgt->state.sReg_cp);
-	vfree(vgt);
-	printk("vGT: vgt_release_instance done\n");
+	if (!ha->saved_for_restore) {
+		vfree(vgt->state.vReg_cp);
+		vfree(vgt->state.sReg_cp);
+		vfree(vgt);
+		printk("vGT: vgt_release_instance done\n");
+	}
+	else {
+		printk("XXH: cp saved vgt_release_instance not done\n");
+	}
 }
 
 void vgt_reset_ppgtt(struct vgt_device *vgt, unsigned long ring_bitmap)

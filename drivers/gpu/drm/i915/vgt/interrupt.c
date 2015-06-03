@@ -1971,7 +1971,7 @@ static void vgt_init_events(
 		/* Default forwarding to all VMs (render and most display events) */
 		SET_POLICY_ALL(hstate, i);
 		hstate->events[i].p_handler = vgt_handle_default_event_phys;
-		hstate->events[i].v_handler = vgt_handle_default_event_virt;;
+		hstate->events[i].v_handler = vgt_handle_default_event_virt;
 	}
 
 	SET_P_HANDLER(hstate, DPST_PHASE_IN, vgt_handle_phase_in_phys);

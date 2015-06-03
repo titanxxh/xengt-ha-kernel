@@ -1467,13 +1467,13 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	struct vgt_device_info *info = &pdev->device_info;
 	struct vgt_mm *ggtt_mm = vgt->gtt.ggtt_mm;
 	unsigned long g_gtt_index = off >> info->gtt_entry_size_shift;
-	unsigned long gma, offset;
-	gtt_entry_t e, m, o;
+	unsigned long gma;//, offset;
+	gtt_entry_t e, m;//, o;
 	int rc;
-	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
+	/*unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
 	unsigned long gfn;
 	struct vgt_gtt_pte_ops *pte_ops = pdev->gtt.pte_ops;
-	ha_guest_page_t *guest_page;
+	ha_guest_page_t *guest_page;*/
 
 	if (bytes != 4 && bytes != 8)
 		return false;
@@ -1506,7 +1506,7 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	if (e.type != GTT_TYPE_GGTT_PTE)
 		return true;
 
-	ggtt_get_guest_entry(ggtt_mm, &o, g_gtt_index);
+	/*ggtt_get_guest_entry(ggtt_mm, &o, g_gtt_index);
 	if (vgt->vm_id && vgt->ha.guest_pages_initialized) {
 		if ((bytes == 4 && o.val32[0]!=e.val32[0]) || (bytes == 8 && o.val64!=e.val64)) {
 			vgt->ha.gtt_changed_entries_cnt++;
@@ -1533,7 +1533,7 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 				}
 			}
 		}
-	}
+	}*/
 	ggtt_set_guest_entry(ggtt_mm, &e, g_gtt_index);
 
 	rc = gtt_entry_p2m(vgt, &e, &m);

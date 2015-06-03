@@ -52,6 +52,10 @@ typedef uint32_t vgt_reg_t;
 struct pgt_device;
 struct vgt_device;
 extern struct vgt_device *vgt_dom0;
+
+extern struct vgt_device *vgt_saved;//NOTE temp solution here
+extern bool vgt_prepared_for_restoring;
+
 extern struct pgt_device *perf_pgt;
 extern struct list_head pgt_devices;
 extern struct pgt_device default_device;
@@ -896,16 +900,23 @@ struct gt_port {
 };
 
 typedef struct {
-	uint32_t time;
+//in use
+	wait_queue_head_t event_wq;
+	int request;
+	bool saved_for_restore;
 	int checkpoint_id;
+	uint32_t *saved_context_save_area;
+	void *saved_gtt;
+	struct task_struct *request_thread;
+
+//not used now
 	int checkpoint_request;
 	int save_request;
 	int saving;
 	int restore_request;
 	int restoring;
-	/* stop ha when instance is supposed to be removed from render run queue */
-	bool force_disable_ha;
 	bool enabled;
+	uint32_t time;
 	uint64_t saved_gm_size;
 	uint32_t *saved_gm;
 	uint32_t dummy_gm[2*PAGE_SIZE/sizeof(uint32_t)];
@@ -920,9 +931,7 @@ typedef struct {
 	unsigned long gtt_changed_entries_cnt;
 	bool incremental;
 	bool gm_first_cached;
-	uint32_t *saved_context_save_area;
 	struct vgt_vgtt_info gtt_saved;
-	struct task_struct *request_thread;
 	struct task_struct *thread;
 	bool test;
 	unsigned long gtt_dummy_entry_cnt;
@@ -1558,6 +1567,20 @@ static inline bool vgt_chk_raised_request(struct pgt_device *pdev, uint32_t flag
 {
 	return !!(test_bit(flag, (void *)&pdev->request));
 }
+
+#define VGT_HA_REQUEST_SAVE	0
+#define VGT_HA_REQUEST_RESTORE	1
+#define VGT_HA_REQUEST_CREATE	2
+#define VGT_HA_REQUEST_CONTINUE	3
+
+static inline void vgt_raise_ha_request(struct vgt_device *vgt, uint32_t flag)
+{
+	set_bit(flag, (void *)&vgt->ha.request);
+	if (waitqueue_active(&vgt->ha.event_wq))
+		wake_up(&vgt->ha.event_wq);
+}
+
+extern int hvm_toggle_iorequest_server(struct vgt_device *vgt, bool enable);
 
 /* check whether a reg access should happen on real hw */
 static inline bool reg_hw_access(struct vgt_device *vgt, unsigned int reg)

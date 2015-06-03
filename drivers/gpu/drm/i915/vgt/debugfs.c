@@ -917,12 +917,13 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 	vgt_ha_t *ha = &(vgt->ha);
 	//int pos, changes = 0;
 
-	seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
+	seq_printf(m, "%d\n", ha->saving);
+	/*seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
 	seq_printf(m, "gtt wp pages %d\n", atomic_read(&vgt->gtt.n_write_protected_guest_page));
 	seq_printf(m, "ha wp pages %d\n", atomic_read(&ha->n_write_protected_guest_page));
 	seq_printf(m, "guest pages %ld\n", ha->guest_page_cnt);
 	seq_printf(m, "last_changed_pages_cnt=%lu\n", ha->last_changed_pages_cnt);
-	seq_printf(m, "gtt_changed_entries_cnt=%lu\n", ha->gtt_changed_entries_cnt);
+	seq_printf(m, "gtt_changed_entries_cnt=%lu\n", ha->gtt_changed_entries_cnt);*/
 	/*for_each_set_bit(pos, vgt->ha.saved_gm_bitmap_swap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
 	{
 		seq_printf(m, "%x ", pos);
@@ -930,9 +931,9 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 			seq_printf(m, "\n");
 	}
 	seq_printf(m, "\nbitmap bits changed %d\n", changes);*/
-	seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
+	/*seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
 	seq_printf(m, "inc enabled %s\n", ha->incremental ? "yes" : "no");
-	seq_printf(m, "pdev ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");
+	seq_printf(m, "pdev ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");*/
 	return 0;
 }
 
@@ -954,8 +955,15 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 	if (copy_from_user(buf, ubuf, count))
 		return -EFAULT;
 
-	if (!strncmp(buf, "create", 6)) {
-		vgt->ha.checkpoint_request = 1;
+	if (!strncmp(buf, "save", 4)) {
+		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_SAVE);
+		vgt_info("XXH: ha save request set\n");
+	} else if (!strncmp(buf, "prepare_restore", 15)) {
+		vgt_info("XXH: ha prepare_restore\n");
+	} else if (!strncmp(buf, "create", 6)) {
+		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_CREATE);
+	} else if (!strncmp(buf, "continue", 8)) {
+		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_CONTINUE);
 	} else if (!strncmp(buf, "enable", 6)) {
 		vgt->ha.enabled = !vgt->ha.enabled;
 		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
@@ -977,9 +985,15 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 			if (vgt->ha.incremental)
 				vgt->ha.gm_first_cached = false;
 		}
+	} else if (!strncmp(buf, "ioreq_server_enable", 19)) {
+		hvm_toggle_iorequest_server(vgt, 1);
 	} else if (!strncmp(buf, "restore", 7)) {
-		vgt->ha.restore_request = 1;
+		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_RESTORE);
 		vgt_info("XXH: ha restore request set\n");
+		vgt_info("XXH: run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+	/*} else if (!strncmp(buf, "restore", 7)) {
+		vgt->ha.restore_request = 1;
+		vgt_info("XXH: ha restore request set\n");*/
 	} else if (!strncmp(buf, "nrrunq", 6)) {
 		struct vgt_device *vgt2;
 		struct list_head *pos, *n;
