@@ -364,6 +364,11 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		ha->enabled = false;
 		ha->incremental = false;
 		ha->gm_first_cached = false;
+		ha->guest_gm_bitmap_size = SIZE_1MB;//=4G >> PAGE_SHIFT
+		ha->guest_gm_bitmap_inited = false;
+		ha->guest_gm_bitmap_blob.data = ha->guest_gm_bitmap;
+		ha->guest_gm_bitmap_blob.size = ha->guest_gm_bitmap_size / BITS_PER_BYTE;
+		vgt_info("XXH: guest_gm_bitmap size %lx u32 %ld ul %ld\n", ha->guest_gm_bitmap_size, sizeof(u32), sizeof(unsigned long));
 		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
 		ha->saved_gtt = vzalloc(vgt->gtt.ggtt_mm->page_table_entry_size);
 		if (!ha->saved_context_save_area || !ha->saved_gtt)
@@ -430,8 +435,8 @@ err2:
 			vfree(vgt->ha.saved_gm_bitmap_swap);
 		if (vgt->ha.guest_pages)
 			vfree(vgt->ha.guest_pages);*/
-		if (vgt->ha.saved_context_save_area)
-			vfree(vgt->ha.saved_context_save_area);
+		if (ha->saved_context_save_area)
+			vfree(ha->saved_context_save_area);
 		if(ha->saved_gtt)
 			vfree(ha->saved_gtt);
 	}

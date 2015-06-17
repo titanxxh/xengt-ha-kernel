@@ -1468,11 +1468,11 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	struct vgt_mm *ggtt_mm = vgt->gtt.ggtt_mm;
 	unsigned long g_gtt_index = off >> info->gtt_entry_size_shift;
 	unsigned long gma;//, offset;
-	gtt_entry_t e, m;//, o;
+	gtt_entry_t e, m, o;
 	int rc;
-	/*unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
 	unsigned long gfn;
 	struct vgt_gtt_pte_ops *pte_ops = pdev->gtt.pte_ops;
+	/*unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
 	ha_guest_page_t *guest_page;*/
 
 	if (bytes != 4 && bytes != 8)
@@ -1506,6 +1506,31 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 	if (e.type != GTT_TYPE_GGTT_PTE)
 		return true;
 
+	ggtt_get_guest_entry(ggtt_mm, &o, g_gtt_index);
+	if (vgt->vm_id && vgt->ha.guest_gm_bitmap_inited) {
+		if ((bytes == 4 && o.val32[0]!=e.val32[0]) || (bytes == 8 && o.val64!=e.val64)) {
+			gfn = pte_ops->get_pfn(&o);
+			if (gfn != vgt->ha.dummy_page_gfn && gfn) {
+				if (gfn < vgt->ha.guest_gm_bitmap_size)
+					bitmap_clear(vgt->ha.guest_gm_bitmap, gfn, 1);
+				else
+					vgt_err("XXH: write gtt clear gfn too large!\n");
+			}
+			gfn = pte_ops->get_pfn(&e);
+			if (gfn != vgt->ha.dummy_page_gfn && gfn) {
+				if (gfn < vgt->ha.guest_gm_bitmap_size) {
+					if (test_bit(gfn, vgt->ha.guest_gm_bitmap)) {
+						vgt->ha.dummy_page_gfn = gfn;
+						vgt_info("XXH: dummy page gfn %lx\n", vgt->ha.dummy_page_gfn);
+					}
+					bitmap_set(vgt->ha.guest_gm_bitmap, gfn, 1);
+				}
+				else
+					vgt_err("XXH: write gtt set gfn too large!\n");
+			}
+			vgt->ha.gtt_changed_entries_cnt++;
+		}
+	}
 	/*ggtt_get_guest_entry(ggtt_mm, &o, g_gtt_index);
 	if (vgt->vm_id && vgt->ha.guest_pages_initialized) {
 		if ((bytes == 4 && o.val32[0]!=e.val32[0]) || (bytes == 8 && o.val64!=e.val64)) {

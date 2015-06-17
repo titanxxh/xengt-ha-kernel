@@ -2131,6 +2131,25 @@ int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 	return 0;
 }
 
+void vgt_ha_init_guest_gm_bitmap(struct vgt_device *vgt)
+{
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	int i;
+	unsigned long gfn, gma;
+
+	for (i = 0; i < vgt->ha.saved_gm_size >> PAGE_SHIFT; i++) {
+		gma = vgt_ha_ha_index_to_gma(vgt, i);
+		gfn = vgt_gma_to_gpa(mm, gma) >> PAGE_SHIFT;
+		if (gfn == 0)
+			printk("XXH: gfn=0 gma %lx index %x\n", gma, i);
+		if (gfn < vgt->ha.guest_gm_bitmap_size) {
+			bitmap_set(vgt->ha.guest_gm_bitmap, gfn, 1);
+		} else
+			vgt_err("XXH: init gfn too large!\n");
+	}
+	vgt->ha.guest_gm_bitmap_inited = true;
+}
+
 int vgt_ha_request_thread(void *priv)
 {
 	struct vgt_device *vgt = (struct vgt_device *)priv;
@@ -2142,7 +2161,6 @@ int vgt_ha_request_thread(void *priv)
 	vgt_info("XXH: vm %d ha request thread start\n", vgt->vm_id);
 	while (true)
 	{
-		//msleep(15);
 		ret = wait_event_interruptible(ha->event_wq, ha->request || kthread_should_stop());
 		if (kthread_should_stop())
 			return 0;
@@ -2450,6 +2468,9 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 		else
 			vgt_info("restore fail!\n");
 	}
+
+	if (prev->vm_id && !prev->ha.guest_gm_bitmap_inited)
+		vgt_ha_init_guest_gm_bitmap(prev);
 
 	/* STEP-1: manually save render context */
 	vgt_rendering_save_mmio(prev);

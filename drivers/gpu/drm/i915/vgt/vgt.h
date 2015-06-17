@@ -35,6 +35,7 @@
 #include <linux/hashtable.h>
 #include <linux/pci.h>
 #include <linux/mempool.h>
+#include <linux/debugfs.h>
 #include <drm/drmP.h>
 
 #include "vgt-if.h"
@@ -908,11 +909,16 @@ typedef struct {
 	uint32_t *saved_context_save_area;
 	void *saved_gtt;
 	struct task_struct *request_thread;
+	bool guest_gm_bitmap_inited;
+	DECLARE_BITMAP(guest_gm_bitmap, SIZE_1MB);//=4G >> PAGE_SHIFT
+	unsigned long guest_gm_bitmap_size;
+	struct debugfs_blob_wrapper guest_gm_bitmap_blob;
+	u32 saving;
+	unsigned long gtt_changed_entries_cnt;
 
 //not used now
 	int checkpoint_request;
 	int save_request;
-	int saving;
 	int restore_request;
 	int restoring;
 	bool enabled;
@@ -928,7 +934,6 @@ typedef struct {
 	unsigned long guest_page_cnt;
 	atomic_t n_write_protected_guest_page;
 	unsigned long last_changed_pages_cnt;
-	unsigned long gtt_changed_entries_cnt;
 	bool incremental;
 	bool gm_first_cached;
 	struct vgt_vgtt_info gtt_saved;

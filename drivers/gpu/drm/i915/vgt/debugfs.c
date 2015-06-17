@@ -103,6 +103,8 @@ enum vgt_debugfs_entry_t
 	VGT_DEBUGFS_DPY_INFO,
 	VGT_DEBUGFS_VIRTUAL_GTT,
 	VGT_DEBUGFS_HA_CP,
+	VGT_DEBUGFS_HA_GM_BITMAP,
+	VGT_DEBUGFS_HA_STATE,
 	VGT_DEBUGFS_ENTRY_MAX
 };
 
@@ -915,22 +917,20 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 {
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
 	vgt_ha_t *ha = &(vgt->ha);
-	//int pos, changes = 0;
+	int pos, cnt = 0;
 
-	seq_printf(m, "%d\n", ha->saving);
 	/*seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
 	seq_printf(m, "gtt wp pages %d\n", atomic_read(&vgt->gtt.n_write_protected_guest_page));
 	seq_printf(m, "ha wp pages %d\n", atomic_read(&ha->n_write_protected_guest_page));
 	seq_printf(m, "guest pages %ld\n", ha->guest_page_cnt);
 	seq_printf(m, "last_changed_pages_cnt=%lu\n", ha->last_changed_pages_cnt);
 	seq_printf(m, "gtt_changed_entries_cnt=%lu\n", ha->gtt_changed_entries_cnt);*/
-	/*for_each_set_bit(pos, vgt->ha.saved_gm_bitmap_swap, vgt->ha.saved_gm_size >> PAGE_SHIFT)
+	for_each_set_bit(pos, ha->guest_gm_bitmap, ha->guest_gm_bitmap_size)
 	{
-		seq_printf(m, "%x ", pos);
-		if (++changes % 10 == 0 )
-			seq_printf(m, "\n");
+		cnt++;
 	}
-	seq_printf(m, "\nbitmap bits changed %d\n", changes);*/
+	seq_printf(m, "\nbitmap bits total %d changed %ld\n", cnt, ha->gtt_changed_entries_cnt);
+	ha->gtt_changed_entries_cnt = 0;
 	/*seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
 	seq_printf(m, "inc enabled %s\n", ha->incremental ? "yes" : "no");
 	seq_printf(m, "pdev ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");*/
@@ -964,6 +964,8 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_CREATE);
 	} else if (!strncmp(buf, "continue", 8)) {
 		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_CONTINUE);
+	} else if (!strncmp(buf, "ioreq", 5)) {
+		hvm_toggle_iorequest_server(vgt, 1);
 	} else if (!strncmp(buf, "enable", 6)) {
 		vgt->ha.enabled = !vgt->ha.enabled;
 		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
@@ -985,8 +987,6 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 			if (vgt->ha.incremental)
 				vgt->ha.gm_first_cached = false;
 		}
-	} else if (!strncmp(buf, "ioreq_server_enable", 19)) {
-		hvm_toggle_iorequest_server(vgt, 1);
 	} else if (!strncmp(buf, "restore", 7)) {
 		vgt_raise_ha_request(vgt, VGT_HA_REQUEST_RESTORE);
 		vgt_info("XXH: ha restore request set\n");
@@ -1009,6 +1009,7 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 			vgt_info("vm %d ring %d startgma %x size %lx\n", vgt->vm_id, i, vgt->rb[i].vring.start, _RING_CTL_BUF_SIZE(vgt->rb[i].vring.ctl));
 		}
 	} else {
+		vgt_info("XXH: unknown cmd %s\n", buf);
 		vgt_info("XXH: accepted cmd:\ncreate\nenable\nrestore\n");
 	}
 
@@ -1019,6 +1020,43 @@ static const struct file_operations ha_checkpoint_fops = {
 	.open = vgt_ha_checkpoint_open,
 	.read = seq_read,
 	.write = vgt_ha_checkpoint_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int vgt_ha_state_show(struct seq_file *m, void *data)
+{
+	struct vgt_device *vgt =  (struct vgt_device *)m->private;
+	vgt_ha_t *ha = &(vgt->ha);
+
+	seq_printf(m, "%u\n", ha->saving);
+	return 0;
+}
+
+static int vgt_ha_state_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, vgt_ha_state_show, inode->i_private);
+}
+
+static ssize_t vgt_ha_state_write(struct file *file,
+		const char __user *ubuf, size_t count, loff_t *ppos)
+{
+	//struct seq_file *s = file->private_data;
+	//struct vgt_device *vgt =  (struct vgt_device *)s->private;
+	char buf[32];
+
+	if (*ppos && count > sizeof(buf))
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+	return count;
+}
+
+static const struct file_operations ha_state_fops = {
+	.open = vgt_ha_state_open,
+	.read = seq_read,
+	.write = vgt_ha_state_write,
 	.llseek = seq_lseek,
 	.release = single_release,
 };
@@ -1212,6 +1250,24 @@ int vgt_create_debugfs(struct vgt_device *vgt)
 		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_checkpoint\n", vgt_id);
 	else
 		printk("vGT(%d): create debugfs node: ha_checkpoint\n", vgt_id);
+
+	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_GM_BITMAP] = debugfs_create_blob("ha_gm_bitmap",
+			0444,
+			d_per_vgt[vgt_id],
+			&vgt->ha.guest_gm_bitmap_blob);
+
+	if (!d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_GM_BITMAP])
+		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_gm_bitmap\n", vgt_id);
+	else
+		printk("vGT(%d): create debugfs node: ha_gm_bitmap\n", vgt_id);
+
+	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_STATE] = debugfs_create_file("ha_state",
+			0444, d_per_vgt[vgt_id], vgt, &ha_state_fops);
+
+	if (!d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_STATE])
+		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_state\n", vgt_id);
+	else
+		printk("vGT(%d): create debugfs node: ha_state\n", vgt_id);
 
 	/* perf vm perfermance statistics */
 	perf_dir_entry = debugfs_create_dir("perf", d_per_vgt[vgt_id]);
