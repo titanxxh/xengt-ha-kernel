@@ -917,7 +917,8 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 {
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
 	vgt_ha_t *ha = &(vgt->ha);
-	int pos, cnt = 0;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	int pos, cnt = 0, i;
 
 	/*seq_printf(m, "XXH test vmid=%d\n", vgt->vm_id);
 	seq_printf(m, "gtt wp pages %d\n", atomic_read(&vgt->gtt.n_write_protected_guest_page));
@@ -931,6 +932,11 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 	}
 	seq_printf(m, "\nbitmap bits total %d changed %ld\n", cnt, ha->gtt_changed_entries_cnt);
 	ha->gtt_changed_entries_cnt = 0;
+	for (i = 0; i < mm->page_table_entry_size/sizeof(uint32_t); i ++) {
+		seq_printf(m, "%x ", ((uint32_t *)(vgt->ha.saved_gtt))[i]);
+		if (i % 0x100 == 0)
+			seq_printf(m, "\n");
+	}
 	/*seq_printf(m, "ha enabled %s\n", ha->enabled ? "yes" : "no");
 	seq_printf(m, "inc enabled %s\n", ha->incremental ? "yes" : "no");
 	seq_printf(m, "pdev ppgtt enabled %s\n", vgt->pdev->enable_ppgtt ? "yes" : "no");*/

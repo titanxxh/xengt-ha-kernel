@@ -610,7 +610,9 @@ static int i915_drm_suspend(struct drm_device *dev)
 		intel_suspend_hw(dev);
 	}
 
+	printk("XXH %s suspend gtt start\n", __func__);
 	i915_gem_suspend_gtt_mappings(dev);
+	printk("XXH %s suspend gtt end\n", __func__);
 
 	i915_save_state(dev);
 
@@ -630,6 +632,7 @@ static int i915_drm_suspend(struct drm_device *dev)
 
 	intel_display_set_init_power(dev_priv, false);
 
+	printk("XXH %s suspend end\n", __func__);
 	return 0;
 }
 
@@ -683,7 +686,9 @@ static int i915_drm_resume(struct drm_device *dev)
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		mutex_lock(&dev->struct_mutex);
+		printk("XXH %s resume gtt start\n", __func__);
 		i915_gem_restore_gtt_mappings(dev);
+		printk("XXH %s resume gtt end\n", __func__);
 		mutex_unlock(&dev->struct_mutex);
 	}
 
@@ -741,6 +746,7 @@ static int i915_drm_resume(struct drm_device *dev)
 
 	drm_kms_helper_poll_enable(dev);
 
+	printk("XXH %s resume end\n", __func__);
 	return 0;
 }
 
@@ -934,6 +940,7 @@ static int i915_pm_suspend(struct device *dev)
 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
 	int error;
 
+	printk("XXH: %s %s\n", __func__, dev_name(dev));
 	if (!drm_dev || !drm_dev->dev_private) {
 		dev_err(dev, "DRM not initialized, aborting suspend.\n");
 		return -ENODEV;
@@ -992,6 +999,7 @@ static int i915_pm_resume(struct device *dev)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
 
+	printk("XXH: %s %s\n", __func__, dev_name(dev));
 	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 

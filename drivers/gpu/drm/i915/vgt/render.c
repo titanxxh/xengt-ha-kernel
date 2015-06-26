@@ -2069,7 +2069,6 @@ int vgt_ha_save_gtt_gm(struct vgt_device *vgt)
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
 	/*struct hlist_node *n;
 	int ret;
-	int i;
 	ha_guest_page_t *gp;*/
 
 	flush_cache_all();
@@ -2294,7 +2293,7 @@ bool vgt_ha_save(struct vgt_device *vgt)
 {
 	struct pgt_device *pdev = vgt->pdev;
 	int i;
-	vgt_info("XXH: start ha save\n");
+	vgt_err("XXH: start ha save\n");
 	vgt->ha.saving = 1;
 	//NOTE temp solution save vgt info into a temp variable now
 	vgt->ha.saved_for_restore = true;
@@ -2308,7 +2307,7 @@ bool vgt_ha_save(struct vgt_device *vgt)
 		printk("XXH: ring %d head %x tail %x\n", i, rb->sring.head, rb->sring.tail);
 	}
 	vgt_ha_save_gtt_gm(vgt);
-	vgt_info("XXH: finish ha save\n");
+	vgt_err("XXH: finish ha save\n");
 	vgt->ha.saving = 0;
 	return 0;
 }
@@ -2320,7 +2319,7 @@ bool vgt_ha_restore(struct vgt_device *vgt)
 	u64 cost;
 	int i;
 
-	vgt_info("XXH: vgt %d ha restore start\n", vgt->vm_id);
+	vgt_err("XXH: vgt %d ha restore start\n", vgt->vm_id);
 	vgt->ha.restoring = 1;
 	t0 = vgt_get_cycles();
 	vgt_ha_restore_gtt_gm(vgt);
@@ -2335,7 +2334,7 @@ bool vgt_ha_restore(struct vgt_device *vgt)
 	t1 = vgt_get_cycles();
 	cost = t1 - t0;
 	vgt->ha.restoring = 0;
-	printk("XXH ha restore cost %lld\n", cost);
+	vgt_err("XXH ha restore cost %lld\n", cost);
 	return false;
 }
 
@@ -2345,7 +2344,7 @@ void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_s
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
 	int i;
 
-	vgt_info("XXH: copy back data in newly constructed vgt!\n");
+	vgt_err("XXH: copy back data in newly constructed vgt!\n");
 	memcpy(vgt->ha.saved_gtt, vgt_saved->ha.saved_gtt, mm->page_table_entry_size);
 	memcpy((char *)vgt->ha.saved_context_save_area, (char *)vgt_saved->ha.saved_context_save_area, SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
 	for (i = 0; i < pdev->max_engines; i++) {
@@ -2356,9 +2355,11 @@ void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_s
 	memcpy(vgt->state.sReg_cp, vgt_saved->state.sReg_cp, pdev->mmio_size);
 	memcpy(vgt->state.vReg_cp, vgt_saved->state.vReg_cp, pdev->mmio_size);
 	vgt_prepared_for_restoring = false;
+	vgt_err("XXH: gm bitmap size %lx\n", sizeof(vgt->ha.guest_gm_bitmap));
+	memcpy(vgt->ha.guest_gm_bitmap, vgt_saved->ha.guest_gm_bitmap, sizeof(vgt->ha.guest_gm_bitmap));
 	//vgt->ha.restore_request = 1;
 	vgt_ha_restore(vgt);
-	vgt_info("after xl restore, run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+	vgt_err("XXH: after xl restore, run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
 }
 EXPORT_SYMBOL(vgt_restore_saved_instance);
 

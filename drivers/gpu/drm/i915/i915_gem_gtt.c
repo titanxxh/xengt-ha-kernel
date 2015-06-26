@@ -1654,10 +1654,10 @@ void i915_gem_suspend_gtt_mappings(struct drm_device *dev)
 
 	i915_check_and_clear_faults(dev);
 
-	dev_priv->gtt.base.clear_range(&dev_priv->gtt.base,
+	/*dev_priv->gtt.base.clear_range(&dev_priv->gtt.base,
 				       dev_priv->gtt.base.start,
 				       dev_priv->gtt.base.total,
-				       true);
+				       true);*/
 
 	i915_ggtt_flush(dev_priv);
 }
@@ -1671,10 +1671,10 @@ void i915_gem_restore_gtt_mappings(struct drm_device *dev)
 	i915_check_and_clear_faults(dev);
 
 	/* First fill our portion of the GTT with scratch pages */
-	dev_priv->gtt.base.clear_range(&dev_priv->gtt.base,
+	/*dev_priv->gtt.base.clear_range(&dev_priv->gtt.base,
 				       dev_priv->gtt.base.start,
 				       dev_priv->gtt.base.total,
-				       true);
+				       true);*/
 
 	list_for_each_entry(obj, &dev_priv->mm.bound_list, global_list) {
 		struct i915_vma *vma = i915_gem_obj_to_vma(obj,

@@ -896,8 +896,10 @@ int vgt_suspend(struct pci_dev *pdev)
 {
 	struct pgt_device *node, *pgt = NULL;
 
-	if (!hypervisor_check_host() || !vgt_enabled)
+	if (!hypervisor_check_host() || !vgt_enabled) {
+		printk("XXH: %s return at beginning\n", __func__);
 		return 0;
+	}
 
 	if (list_empty(&pgt_devices)) {
 		printk("vGT: no valid pgt_device registered at suspend\n");
@@ -937,8 +939,10 @@ int vgt_resume(struct pci_dev *pdev)
 {
 	struct pgt_device *node, *pgt = NULL;
 
-	if (!hypervisor_check_host() || !vgt_enabled)
+	if (!hypervisor_check_host() || !vgt_enabled) {
+		printk("XXH: %s return at beginning\n", __func__);
 		return 0;
+	}
 
 
 	if (list_empty(&pgt_devices)) {

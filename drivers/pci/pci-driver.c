@@ -869,6 +869,7 @@ static int pci_pm_freeze(struct device *dev)
 	if (pm->freeze) {
 		int error;
 
+		printk("XXH: %s\n", __func__);
 		error = pm->freeze(dev);
 		suspend_report_result(pm->freeze, error);
 		if (error)
