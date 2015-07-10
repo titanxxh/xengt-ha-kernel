@@ -973,6 +973,12 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 	} else if (!strncmp(buf, "ioreq", 5)) {
 		hvm_toggle_iorequest_server(vgt, 1);
 	} else if (!strncmp(buf, "enable", 6)) {
+		vgt->ha.enabled = 1;
+		vgt_info("ha enabled\n");
+	} else if (!strncmp(buf, "disable", 7)) {
+		vgt->ha.enabled = 0;
+		vgt_info("ha disabled\n");
+	/*} else if (!strncmp(buf, "enable", 6)) {
 		vgt->ha.enabled = !vgt->ha.enabled;
 		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
 		if (!vgt->ha.enabled) {
@@ -982,7 +988,7 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 			vgt->ha.incremental = false;
 			vgt->ha.gm_first_cached = false;
 		}
-		vgt->ha.guest_pages_initialized = false;
+		vgt->ha.guest_pages_initialized = false;*/
 	} else if (!strncmp(buf, "inc", 3)) {
 		if (!vgt->ha.enabled) {
 			vgt_info("please enable ha first!\n");
@@ -1034,8 +1040,11 @@ static int vgt_ha_state_show(struct seq_file *m, void *data)
 {
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
 	vgt_ha_t *ha = &(vgt->ha);
+	int state = ha->enabled << 0 |
+		    ha->saving << 1;
 
-	seq_printf(m, "%u\n", ha->saving);
+	vgt_info("ha state %x\n", state);
+	seq_printf(m, "%u\n", state);
 	return 0;
 }
 
