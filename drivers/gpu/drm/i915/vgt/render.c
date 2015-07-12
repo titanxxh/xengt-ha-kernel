@@ -2115,6 +2115,7 @@ void vgt_ha_save_context_save_area(struct vgt_device *vgt, int i)
 int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 {
 	struct pgt_device *pdev = vgt->pdev;
+	vgt_ha_t *ha = &(vgt->ha);
 	/*int cpu;
 	int i = 0;*/
 	vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
@@ -2122,6 +2123,8 @@ int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 	//vgt_lock_dev(pdev, cpu);
 	if (vgt != current_render_owner(pdev)) {
 		vgt_ha_save(vgt);
+		ha->gtt_changed_entries_cnt = 0;
+		memset(ha->dirty_gm_bitmap, 0, ha->guest_gm_bitmap_size / BITS_PER_BYTE);
 		//vgt_unlock_dev(pdev, cpu);
 	}
 	else {
@@ -2143,6 +2146,7 @@ void vgt_ha_init_guest_gm_bitmap(struct vgt_device *vgt)
 			printk("XXH: gfn=0 gma %lx index %x\n", gma, i);
 		if (gfn < vgt->ha.guest_gm_bitmap_size) {
 			bitmap_set(vgt->ha.guest_gm_bitmap, gfn, 1);
+			bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
 		} else
 			vgt_err("XXH: init gfn too large!\n");
 	}

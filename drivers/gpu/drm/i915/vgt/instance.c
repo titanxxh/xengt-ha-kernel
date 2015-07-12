@@ -366,7 +366,8 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		ha->gm_first_cached = false;
 		ha->guest_gm_bitmap_size = SIZE_1MB;//=4G >> PAGE_SHIFT
 		ha->guest_gm_bitmap_inited = false;
-		ha->guest_gm_bitmap_blob.data = ha->guest_gm_bitmap;
+		//ha->guest_gm_bitmap_blob.data = ha->guest_gm_bitmap;
+		ha->guest_gm_bitmap_blob.data = ha->dirty_gm_bitmap;
 		ha->guest_gm_bitmap_blob.size = ha->guest_gm_bitmap_size / BITS_PER_BYTE;
 		vgt_info("XXH: guest_gm_bitmap size %lx u32 %ld ul %ld\n", ha->guest_gm_bitmap_size, sizeof(u32), sizeof(unsigned long));
 		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);

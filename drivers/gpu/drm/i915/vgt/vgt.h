@@ -911,17 +911,18 @@ typedef struct {
 	struct task_struct *request_thread;
 	bool guest_gm_bitmap_inited;
 	DECLARE_BITMAP(guest_gm_bitmap, SIZE_1MB);//=4G >> PAGE_SHIFT
+	DECLARE_BITMAP(dirty_gm_bitmap, SIZE_1MB);//=4G >> PAGE_SHIFT
 	unsigned long guest_gm_bitmap_size;
 	struct debugfs_blob_wrapper guest_gm_bitmap_blob;
 	u32 saving;
 	unsigned long gtt_changed_entries_cnt;
+	bool enabled;
 
 //not used now
 	int checkpoint_request;
 	int save_request;
 	int restore_request;
 	int restoring;
-	bool enabled;
 	uint32_t time;
 	uint64_t saved_gm_size;
 	uint32_t *saved_gm;
