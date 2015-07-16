@@ -1300,7 +1300,8 @@ unsigned long vgt_gma_to_gpa(struct vgt_mm *mm, unsigned long gma)
 
 	if (mm->type == VGT_MM_GGTT) {
 		if (!g_gm_is_valid(vgt, gma))
-			goto err;
+			return INVALID_ADDR;
+			//goto err;
 
 		ggtt_get_guest_entry(mm, &e, gma_ops->gma_to_ggtt_pte_index(gma));
 		gpa = (pte_ops->get_pfn(&e) << GTT_PAGE_SHIFT) + (gma & ~GTT_PAGE_MASK);
@@ -1524,7 +1525,7 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 						vgt_info("XXH: dummy page gfn %lx\n", vgt->ha.dummy_page_gfn);
 					}
 					bitmap_set(vgt->ha.guest_gm_bitmap, gfn, 1);
-					bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
+					//bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
 				}
 				else
 					vgt_err("XXH: write gtt set gfn too large!\n");

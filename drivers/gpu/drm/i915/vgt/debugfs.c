@@ -934,7 +934,7 @@ static int vgt_ha_checkpoint_show(struct seq_file *m, void *data)
 	{
 		i++;
 	}
-	seq_printf(m, "\nbitmap bits total %d changed %ld new %d\n", cnt, ha->gtt_changed_entries_cnt, i);
+	seq_printf(m, "\nbitmap bits total %d changed %ld dirty %d\n", cnt, ha->gtt_changed_entries_cnt, i);
 	/*for (i = 0; i < mm->page_table_entry_size/sizeof(uint32_t); i ++) {
 		seq_printf(m, "%x ", ((uint32_t *)(vgt->ha.saved_gtt))[i]);
 		if (i % 0x100 == 0)

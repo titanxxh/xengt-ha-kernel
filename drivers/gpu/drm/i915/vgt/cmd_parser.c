@@ -1206,12 +1206,27 @@ static unsigned long get_gma_bb_from_cmd(struct parser_exec_state *s, int index)
 static bool address_audit(struct parser_exec_state *s, int index)
 {
 	int gmadr_bytes = s->vgt->pdev->device_info.gmadr_bytes_in_cmd;
+	struct vgt_device *vgt = s->vgt;
+	unsigned long gma, gfn, gpa;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
 
 	/* TODO:
 	 * Add the address audit implementation here. Right now do nothing
 	 */
 	ASSERT(gmadr_bytes == 4 || gmadr_bytes == 8);
 
+	/* XXH: audit all addr here no matter it is read or write */
+	if (vgt->vm_id && vgt->ha.enabled) {
+		gma = get_gma_bb_from_cmd(s, index);
+		if (s->info->opcode == OP_XY_SRC_COPY_BLT)
+			printk("XXH: index %d gma %lx\n", index, gma);
+		gpa = vgt_gma_to_gpa(mm, gma);
+		if (gpa != INVALID_ADDR) {
+			gfn = gpa >> PAGE_SHIFT;
+			bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
+		}
+		
+	}
 	return true;
 }
 
@@ -1221,6 +1236,12 @@ static bool vgt_cmd_addr_audit_with_bitmap(struct parser_exec_state *s,
 	unsigned int bit;
 	unsigned int delta = 0;
 	int cmd_len = cmd_length(s);
+	struct vgt_device *vgt = s->vgt;
+
+	if (vgt->vm_id && vgt->ha.enabled) {
+		if (s->info->opcode == OP_XY_SRC_COPY_BLT)
+			printk("XXH: OP_XY_SRC_COPY_BLT delta %d\n", gmadr_dw_number(s) - 1);
+	}
 
 	for_each_set_bit(bit, &addr_bitmap, sizeof(addr_bitmap)*8) {
 		if (bit + delta >= cmd_len)
@@ -1574,9 +1595,9 @@ static struct cmd_info cmd_info[] = {
 
 	{"MI_URB_CLEAR", OP_MI_URB_CLEAR, F_LEN_VAR, R_RCS, D_ALL, 0, 8, NULL},
 
-	{"ME_SEMAPHORE_SIGNAL", OP_MI_SEMAPHORE_SIGNAL, F_LEN_VAR, R_ALL, D_BDW, 0, 8, NULL},
+	{"MI_SEMAPHORE_SIGNAL", OP_MI_SEMAPHORE_SIGNAL, F_LEN_VAR, R_ALL, D_BDW, 0, 8, NULL},
 
-	{"ME_SEMAPHORE_WAIT", OP_MI_SEMAPHORE_WAIT, F_LEN_VAR, R_ALL, D_BDW, ADDR_FIX_1(2), 8, NULL},
+	{"MI_SEMAPHORE_WAIT", OP_MI_SEMAPHORE_WAIT, F_LEN_VAR, R_ALL, D_BDW, ADDR_FIX_1(2), 8, NULL},
 
 	{"MI_STORE_DATA_IMM", OP_MI_STORE_DATA_IMM, F_LEN_VAR, R_ALL, D_HSW,
 		ADDR_FIX_1(2), 10, NULL},
@@ -2313,20 +2334,25 @@ static void trace_cs_command(struct parser_exec_state *s)
 
 }
 
-int set_dirty_gm_bitmap(struct vgt_device *vgt, struct parser_exec_state *s)
+static int set_dirty_gm_bitmap(struct parser_exec_state *s)
 {
-	unsigned long *bitmap = vgt->ha.saved_gm_bitmap;
-	//TODO gma should be all possible gma here not ip_gma
-	bitmap_set(bitmap, vgt_ha_gma_to_ha_index(vgt, s->ip_gma), 1);
+	struct vgt_device *vgt = s->vgt;
+	unsigned long *bitmap = vgt->ha.dirty_gm_bitmap;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	uint64_t gfn;
+	/* XXH: gfn should be all possible gfn, here include only ip_gma */
+	gfn = vgt_gma_to_gpa(mm, s->ip_gma) >> PAGE_SHIFT;
+	bitmap_set(bitmap, gfn, 1);
 	return 0;
 }
 
 /* call the cmd handler, and advance ip */
-static int vgt_cmd_parser_exec(struct vgt_device *vgt, struct parser_exec_state *s)
+static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 {
 	struct cmd_info *info;
 	uint32_t cmd, cmd_len, i;
 	int rc = 0;
+	struct vgt_device *vgt = s->vgt;
 
 	hypervisor_read_va(s->vgt, s->ip_va, &cmd, sizeof(cmd), 1);
 
@@ -2346,9 +2372,8 @@ static int vgt_cmd_parser_exec(struct vgt_device *vgt, struct parser_exec_state 
 
 	vgt_cmd_addr_audit_with_bitmap(s, info->addr_bitmap);
 
-	//use s->info to set bit in gm bitmap
-	/*if (vgt->vm_id)
-		set_dirty_gm_bitmap(vgt, s);*/
+	if (vgt->vm_id)
+		set_dirty_gm_bitmap(s);
 
 	/* Let's keep this logic here. Someone has special needs for dumping
 	 * commands can customize this code snippet.
@@ -2469,7 +2494,7 @@ static int __vgt_scan_vring(struct vgt_device *vgt, int ring_id, vgt_reg_t head,
 
 		cmd_nr++;
 
-		rc = vgt_cmd_parser_exec(vgt, &s);
+		rc = vgt_cmd_parser_exec(&s);
 		if (rc < 0) {
 			vgt_err("cmd parser error\n");
 			break;
