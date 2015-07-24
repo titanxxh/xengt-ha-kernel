@@ -917,6 +917,7 @@ typedef struct {
 	u32 saving;
 	unsigned long gtt_changed_entries_cnt;
 	bool enabled;
+	bool reg_track;
 
 //not used now
 	int checkpoint_request;

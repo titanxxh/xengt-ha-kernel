@@ -1562,6 +1562,9 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 		}
 	}*/
 	ggtt_set_guest_entry(ggtt_mm, &e, g_gtt_index);
+	if (vgt->vm_id && vgt->ha.guest_gm_bitmap_inited && vgt->ha.reg_track) {
+		memcpy(vgt->ha.saved_gtt, &e.val32[0], bytes);
+	}
 
 	rc = gtt_entry_p2m(vgt, &e, &m);
 	if (!rc) {

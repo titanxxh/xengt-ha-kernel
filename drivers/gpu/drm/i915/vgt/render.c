@@ -2150,6 +2150,10 @@ void vgt_ha_init_guest_gm_bitmap(struct vgt_device *vgt)
 		} else
 			vgt_err("XXH: init gfn too large!\n");
 	}
+	if (vgt->ha.reg_track) {
+		vgt_ha_rendering_save_mmio(vgt, false);
+		vgt_ha_save_gtt_gm(vgt);
+	}
 	vgt->ha.guest_gm_bitmap_inited = true;
 }
 
@@ -2310,7 +2314,8 @@ bool vgt_ha_save(struct vgt_device *vgt)
 		vgt_ha_save_context_save_area(vgt, i);
 		printk("XXH: ring %d head %x tail %x\n", i, rb->sring.head, rb->sring.tail);
 	}
-	vgt_ha_save_gtt_gm(vgt);
+	if (!vgt->ha.reg_track || !vgt->ha.guest_gm_bitmap_inited)
+		vgt_ha_save_gtt_gm(vgt);
 	vgt_err("XXH: finish ha save\n");
 	vgt->ha.saving = 0;
 	return 0;
@@ -2474,11 +2479,11 @@ bool vgt_do_render_context_switch(struct pgt_device *pdev)
 			vgt_info("restore fail!\n");
 	}
 
-	if (prev->vm_id && !prev->ha.guest_gm_bitmap_inited)
-		vgt_ha_init_guest_gm_bitmap(prev);
-
 	/* STEP-1: manually save render context */
 	vgt_rendering_save_mmio(prev);
+
+	if (prev->vm_id && !prev->ha.guest_gm_bitmap_inited)
+		vgt_ha_init_guest_gm_bitmap(prev);
 
 	/* STEP-2: HW render context switch */
 	for (i=0; i < pdev->max_engines; i++) {
