@@ -2379,11 +2379,12 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 	 * commands can customize this code snippet.
 	 */
 #if 1
-	klog_printk("VM%d CMD %s name %s op 0x%x ip(%08lx): ",
+	klog_printk("VM%d CMD %s name %s op 0x%x addr_cnt %x ip(%08lx): ",
 			vgt->vm_id,
 			s->buf_type == RING_BUFFER_INSTRUCTION ? "RB" : "BB",
 			s->info->name,
 			s->info->opcode,
+			s->info->addr_bitmap,
 			s->ip_gma);
 	cmd_len = cmd_length(s);
 	for (i = 0; i < cmd_len; i++) {

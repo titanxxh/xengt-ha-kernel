@@ -2347,6 +2347,31 @@ bool vgt_ha_restore(struct vgt_device *vgt)
 	return false;
 }
 
+void vgt_restore_vgt_state(struct vgt_device *vgt)
+{
+	struct debugfs_blob_wrapper *blob = &vgt->ha.vgt_info_blob;
+	struct pgt_device *pdev = vgt->pdev;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+	int i = 0;
+	int restore_magic = 0;
+	memcpy(vgt->ha.saved_gtt, (char *)blob->data + i, mm->page_table_entry_size);
+	i += mm->page_table_entry_size;
+	memcpy(vgt->ha.saved_context_save_area, (char *)blob->data + i, SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+	i += SZ_CONTEXT_AREA_PER_RING * pdev->max_engines;
+	memcpy(vgt->rb_cp, (char *)blob->data + i, sizeof(vgt_state_ring_t) * pdev->max_engines);
+	i += sizeof(vgt_state_ring_t) * pdev->max_engines;
+	memcpy(vgt->state.sReg_cp, (char *)blob->data + i, pdev->mmio_size);
+	i += pdev->mmio_size;
+	memcpy(vgt->state.vReg_cp, (char *)blob->data + i, pdev->mmio_size);
+	i += pdev->mmio_size;
+	memcpy(&restore_magic, (char *)blob->data + i, sizeof(int));
+	vgt_err("XXH: magic number for restore: %x\n", restore_magic);
+	vgt_prepared_for_restoring = false;
+	vgt_ha_restore(vgt);
+	vgt_err("XXH: after xl restore, run queue count: %d\n", vgt_nr_in_runq(vgt->pdev));
+}
+EXPORT_SYMBOL(vgt_restore_vgt_state);
+
 void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_saved)
 {
 	struct pgt_device *pdev = vgt->pdev;

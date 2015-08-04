@@ -125,6 +125,7 @@ int vgt_ha_thread(void *priv)
 }
 
 extern int vgt_ha_request_thread(void *);
+extern void vgt_restore_vgt_state(struct vgt_device *vgt);
 extern void vgt_restore_saved_instance(struct vgt_device *vgt, struct vgt_device *vgt_saved);
 
 /*
@@ -370,14 +371,23 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		//ha->guest_gm_bitmap_blob.data = ha->guest_gm_bitmap;
 		ha->guest_gm_bitmap_blob.data = ha->dirty_gm_bitmap;
 		ha->guest_gm_bitmap_blob.size = ha->guest_gm_bitmap_size / BITS_PER_BYTE;
+		ha->vgt_info_blob.size = 11 * SIZE_1MB;
+		if (vgt_prepared_for_restoring && vgt_state_res) {
+			ha->vgt_info_blob.data = vgt_state_res;
+			vgt_state_res = NULL;
+		} else {
+			ha->vgt_info_blob.data = vzalloc(ha->vgt_info_blob.size);
+		}
 		vgt_info("XXH: guest_gm_bitmap size %lx u32 %ld ul %ld\n", ha->guest_gm_bitmap_size, sizeof(u32), sizeof(unsigned long));
 		ha->saved_context_save_area = vzalloc(SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
 		ha->saved_gtt = vzalloc(vgt->gtt.ggtt_mm->page_table_entry_size);
 		if (!ha->saved_context_save_area || !ha->saved_gtt)
 			goto err;
-		vgt_info("XXH: backup gtt size %llx context_area size %llx\n",
+		vgt_info("XXH: backup gtt size %llx context_area size %llx rb %llx state.sReg %llx\n",
 				(unsigned long long)vgt->gtt.ggtt_mm->page_table_entry_size,
-				(unsigned long long)SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+				(unsigned long long)SZ_CONTEXT_AREA_PER_RING * pdev->max_engines,
+				(unsigned long long)sizeof(vgt_state_ring_t),
+				(unsigned long long)pdev->mmio_size);
 		/*ha->saved_gm_size = vp.gm_sz * SIZE_1MB;
 		ha->saved_gm = vzalloc(vgt->ha.saved_gm_size);
 		ha->saved_gm_bitmap = vzalloc(ha->saved_gm_size >> PAGE_SHIFT);
@@ -410,7 +420,8 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		}
 		ha->thread = thread;*/
 		if (vgt_prepared_for_restoring) {
-			vgt_restore_saved_instance(vgt, vgt_saved);
+			vgt_restore_vgt_state(vgt);
+			//vgt_restore_saved_instance(vgt, vgt_saved);
 		}
 	}
 	return 0;
@@ -482,6 +493,7 @@ void vgt_release_instance(struct vgt_device *vgt)
 		if (!ha->saved_for_restore) {
 			vfree(ha->saved_gtt);
 			vfree(ha->saved_context_save_area);
+			vfree(ha->vgt_info_blob.data);
 		}
 	}
 

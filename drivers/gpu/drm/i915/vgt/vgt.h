@@ -54,6 +54,7 @@ struct pgt_device;
 struct vgt_device;
 extern struct vgt_device *vgt_dom0;
 
+extern char *vgt_state_res;
 extern struct vgt_device *vgt_saved;//NOTE temp solution here
 extern bool vgt_prepared_for_restoring;
 
@@ -914,6 +915,7 @@ typedef struct {
 	DECLARE_BITMAP(dirty_gm_bitmap, SIZE_1MB);//=4G >> PAGE_SHIFT
 	unsigned long guest_gm_bitmap_size;
 	struct debugfs_blob_wrapper guest_gm_bitmap_blob;
+	struct debugfs_blob_wrapper vgt_info_blob;
 	u32 saving;
 	unsigned long gtt_changed_entries_cnt;
 	bool enabled;

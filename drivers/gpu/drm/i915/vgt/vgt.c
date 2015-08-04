@@ -177,6 +177,7 @@ struct pgt_device default_device = {
 };
 
 struct vgt_device *vgt_dom0;
+char *vgt_state_res;
 struct vgt_device *vgt_saved;
 bool vgt_prepared_for_restoring;
 struct pgt_device *pdev_default = &default_device;
@@ -798,6 +799,7 @@ static int vgt_initialize(struct pci_dev *dev)
 
 	vgt_init_fb_notify();
 
+	vgt_state_res = NULL;
 	vgt_saved = NULL;
 	vgt_prepared_for_restoring = false;
 

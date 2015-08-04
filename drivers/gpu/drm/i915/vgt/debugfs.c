@@ -105,6 +105,7 @@ enum vgt_debugfs_entry_t
 	VGT_DEBUGFS_HA_CP,
 	VGT_DEBUGFS_HA_GM_BITMAP,
 	VGT_DEBUGFS_HA_STATE,
+	VGT_DEBUGFS_HA_VGT_INFO,
 	VGT_DEBUGFS_ENTRY_MAX
 };
 
@@ -718,6 +719,29 @@ static const struct file_operations phys_dpyinfo_fops = {
 	.release = single_release,
 };
 
+static ssize_t restore_vgt_info_write(struct file *file,
+               const char __user *ubuf, size_t count, loff_t *ppos)
+{
+       if (vgt_prepared_for_restoring) {
+               vgt_err("copy from user count %x\n", (unsigned int)count);
+               if (!vgt_state_res) {
+                       vgt_state_res = vzalloc(11 * SIZE_1MB);
+               } else {
+                       vgt_warn("XXH: flush last vgt instance state!\n");
+               }
+               return simple_write_to_buffer(vgt_state_res, 11 * SIZE_1MB, ppos, ubuf,
+                               count);
+       } else
+               vgt_warn("XXH: no restoring is running!\n");
+       return 0;
+}
+
+static const struct file_operations restore_vgt_info_fops = {
+       .open = simple_open,
+       .write = restore_vgt_info_write,
+       .llseek = default_llseek,
+};
+
 static int vgt_virt_dpyinfo_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, vgt_show_virt_dpyinfo, inode->i_private);
@@ -1079,6 +1103,47 @@ static const struct file_operations ha_state_fops = {
 	.release = single_release,
 };
 
+static ssize_t vgt_ha_vgt_info_read(struct file *file, char __user *user_buf,
+                             size_t count, loff_t *ppos)
+{
+       struct vgt_device *vgt = file->private_data;
+       struct debugfs_blob_wrapper *blob = &vgt->ha.vgt_info_blob;
+       struct pgt_device *pdev = vgt->pdev;
+       struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+       int i = 0;
+       int restore_magic = 0x37;
+       memcpy((char *)blob->data + i, vgt->ha.saved_gtt, mm->page_table_entry_size);
+       i += mm->page_table_entry_size;
+       memcpy((char *)blob->data + i, vgt->ha.saved_context_save_area, SZ_CONTEXT_AREA_PER_RING * pdev->max_engines);
+       i += SZ_CONTEXT_AREA_PER_RING * pdev->max_engines;
+       memcpy((char *)blob->data + i, vgt->rb_cp, sizeof(vgt_state_ring_t) * pdev->max_engines);
+       i += sizeof(vgt_state_ring_t) * pdev->max_engines;
+       memcpy((char *)blob->data + i, vgt->state.sReg_cp, pdev->mmio_size);
+       i += pdev->mmio_size;
+       memcpy((char *)blob->data + i, vgt->state.vReg_cp, pdev->mmio_size);
+       i += pdev->mmio_size;
+       memcpy((char *)blob->data + i, &restore_magic, sizeof(int));
+       vgt_err("XXH: size of vgt info %x magic %x\n", i, restore_magic);
+       return simple_read_from_buffer(user_buf, count, ppos, blob->data,
+                       blob->size);
+}
+
+static ssize_t vgt_ha_vgt_info_write(struct file *file,
+               const char __user *ubuf, size_t count, loff_t *ppos)
+{
+       struct vgt_device *vgt = file->private_data;
+       struct debugfs_blob_wrapper *blob = &vgt->ha.vgt_info_blob;
+       return simple_write_to_buffer(blob->data, blob->size, ppos, ubuf,
+                       count);
+}
+
+static const struct file_operations ha_vgt_info_fops = {
+       .open = simple_open,
+       .read = vgt_ha_vgt_info_read,
+       .write = vgt_ha_vgt_info_write,
+       .llseek = default_llseek,
+};
+
 /* initialize vGT debufs top directory */
 struct dentry *vgt_init_debugfs(struct pgt_device *pdev)
 {
@@ -1141,6 +1206,11 @@ struct dentry *vgt_init_debugfs(struct pgt_device *pdev)
 
 	temp_d = debugfs_create_file("dpyinfo", 0444, d_vgt_debug,
 		pdev, &phys_dpyinfo_fops);
+	if (!temp_d)
+		return NULL;
+
+	temp_d = debugfs_create_file("restore_vgt_info", 0666, d_vgt_debug,
+			pdev, &restore_vgt_info_fops);
 	if (!temp_d)
 		return NULL;
 
@@ -1286,6 +1356,14 @@ int vgt_create_debugfs(struct vgt_device *vgt)
 		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_state\n", vgt_id);
 	else
 		printk("vGT(%d): create debugfs node: ha_state\n", vgt_id);
+
+	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_VGT_INFO] = debugfs_create_file("ha_vgt_info",
+			0444, d_per_vgt[vgt_id], vgt, &ha_vgt_info_fops);
+
+	if (!d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_VGT_INFO])
+		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_vgt_info\n", vgt_id);
+	else
+		printk("vGT(%d): create debugfs node: ha_vgt_info\n", vgt_id);
 
 	/* perf vm perfermance statistics */
 	perf_dir_entry = debugfs_create_dir("perf", d_per_vgt[vgt_id]);
