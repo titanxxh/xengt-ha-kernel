@@ -91,10 +91,12 @@ static ssize_t vgt_ha_ctl_store(struct kobject *kobj, struct kobj_attribute *att
 	vgt_info("XXH: %s\n", buf);
 	if (!strncmp(buf, "prepare", 7)) {
 		if (!vgt_prepared_for_restoring) {
-			if (vgt_saved)
+			/*if (vgt_saved)
 				vgt_prepared_for_restoring = true;
 			else
-				vgt_warn("XXH: no vgt instance saved!\n");
+				vgt_warn("XXH: no vgt instance saved!\n");*/
+			vgt_warn("XXH: prepare restoring!\n");
+			vgt_prepared_for_restoring = true;
 		} else
 			vgt_warn("XXH: one restoring is running!\n");
 	}
