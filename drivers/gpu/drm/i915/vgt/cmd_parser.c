@@ -1216,7 +1216,7 @@ static bool address_audit(struct parser_exec_state *s, int index)
 	ASSERT(gmadr_bytes == 4 || gmadr_bytes == 8);
 
 	/* XXH: audit all addr here no matter it is read or write */
-	if (vgt->vm_id && vgt->ha.enabled) {
+	if (vgt->vm_id) {
 		gma = get_gma_bb_from_cmd(s, index);
 		if (s->info->opcode == OP_XY_SRC_COPY_BLT)
 			printk("XXH: index %d gma %lx\n", index, gma);
@@ -2334,25 +2334,26 @@ static void trace_cs_command(struct parser_exec_state *s)
 
 }
 
-static int set_dirty_gm_bitmap(struct parser_exec_state *s)
+/*static int set_dirty_gm_bitmap(struct parser_exec_state *s)
 {
 	struct vgt_device *vgt = s->vgt;
 	unsigned long *bitmap = vgt->ha.dirty_gm_bitmap;
 	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
 	uint64_t gfn;
-	/* XXH: gfn should be all possible gfn, here include only ip_gma */
+	// XXH: gfn should be all possible gfn, here include only ip_gma
 	gfn = vgt_gma_to_gpa(mm, s->ip_gma) >> PAGE_SHIFT;
 	bitmap_set(bitmap, gfn, 1);
 	return 0;
-}
+}*/
 
 /* call the cmd handler, and advance ip */
 static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 {
 	struct cmd_info *info;
-	uint32_t cmd, cmd_len, i;
+	uint32_t cmd, cmd_len, i = 0, bit;
 	int rc = 0;
 	struct vgt_device *vgt = s->vgt;
+	unsigned long gma, addr_bitmap;
 
 	hypervisor_read_va(s->vgt, s->ip_va, &cmd, sizeof(cmd), 1);
 
@@ -2372,13 +2373,39 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 
 	vgt_cmd_addr_audit_with_bitmap(s, info->addr_bitmap);
 
-	if (vgt->vm_id)
-		set_dirty_gm_bitmap(s);
+	/* XXH: note the ring is stopped when suspending
+	 * the ring buffer is no need to be saved?
+	 */
+	/*if (vgt->vm_id)
+		set_dirty_gm_bitmap(s);*/
 
 	/* Let's keep this logic here. Someone has special needs for dumping
 	 * commands can customize this code snippet.
 	 */
 #if 1
+	/* XXH: use klog to colloct gpu commands
+	 * vmid cmd_name type opcode addr_bitmap length [parameters]
+	 */
+	cmd_len	= s->info->addr_bitmap;
+	while (cmd_len > 0) {
+		cmd_len &= cmd_len - 1;
+		i++;
+	}
+	klog_printk("VM%d %s %s %x %x %u ",
+			vgt->vm_id,
+			s->info->name,
+			s->buf_type == RING_BUFFER_INSTRUCTION ? "RB" : "BB",
+			s->info->opcode,
+			s->info->addr_bitmap,
+			i);
+	addr_bitmap = s->info->addr_bitmap;
+	for_each_set_bit(bit, &addr_bitmap, sizeof(addr_bitmap)*8) {
+		gma = get_gma_bb_from_cmd(s, bit);
+		klog_printk("%lx ", gma);
+	}
+	klog_printk("\n");
+#endif
+#if 0
 	klog_printk("VM%d CMD %s name %s op 0x%x addr_cnt %x ip(%08lx): ",
 			vgt->vm_id,
 			s->buf_type == RING_BUFFER_INSTRUCTION ? "RB" : "BB",
