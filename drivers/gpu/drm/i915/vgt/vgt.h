@@ -905,7 +905,6 @@ typedef struct {
 //in use
 	wait_queue_head_t event_wq;
 	int request;
-	bool saved_for_restore;
 	int checkpoint_id;
 	uint32_t *saved_context_save_area;
 	void *saved_gtt;
@@ -920,6 +919,7 @@ typedef struct {
 	unsigned long gtt_changed_entries_cnt;
 	bool enabled;
 	bool reg_track;
+	bool logdirty_stop;
 
 //not used now
 	int checkpoint_request;

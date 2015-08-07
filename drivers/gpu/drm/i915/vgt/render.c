@@ -2303,8 +2303,6 @@ bool vgt_ha_save(struct vgt_device *vgt)
 	int i;
 	vgt_err("XXH: start ha save\n");
 	vgt->ha.saving = 1;
-	//NOTE temp solution save vgt info into a temp variable now
-	vgt->ha.saved_for_restore = true;
 	vgt_saved = vgt;
 	vgt_ha_rendering_save_mmio(vgt, false);
 	for (i = 0; i < pdev->max_engines; i++) {

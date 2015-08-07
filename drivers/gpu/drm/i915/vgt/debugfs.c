@@ -1005,6 +1005,9 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 	} else if (!strncmp(buf, "disable", 7)) {
 		vgt->ha.enabled = 0;
 		vgt_info("ha disabled\n");
+	} else if (!strncmp(buf, "logdirty_stop", 13)) {
+		vgt->ha.logdirty_stop = 1;
+		vgt_info("logdirty will stop\n");
 	/*} else if (!strncmp(buf, "enable", 6)) {
 		vgt->ha.enabled = !vgt->ha.enabled;
 		vgt_info("XXH: ha enabled status %d for vgt %d\n", vgt->ha.enabled, vgt->vm_id);
@@ -1068,8 +1071,10 @@ static int vgt_ha_state_show(struct seq_file *m, void *data)
 	struct vgt_device *vgt =  (struct vgt_device *)m->private;
 	vgt_ha_t *ha = &(vgt->ha);
 	int state = ha->enabled << 0 |
-		    ha->saving << 1;
+		    ha->saving << 1 |
+		    ha->logdirty_stop << 2;
 
+	ha->logdirty_stop = 0;
 	vgt_info("ha state %x\n", state);
 	seq_printf(m, "%u\n", state);
 	return 0;

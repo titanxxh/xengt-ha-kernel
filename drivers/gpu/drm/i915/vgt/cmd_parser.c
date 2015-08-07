@@ -1218,8 +1218,6 @@ static bool address_audit(struct parser_exec_state *s, int index)
 	/* XXH: audit all addr here no matter it is read or write */
 	if (vgt->vm_id) {
 		gma = get_gma_bb_from_cmd(s, index);
-		if (s->info->opcode == OP_XY_SRC_COPY_BLT)
-			printk("XXH: index %d gma %lx\n", index, gma);
 		gpa = vgt_gma_to_gpa(mm, gma);
 		if (gpa != INVALID_ADDR) {
 			gfn = gpa >> PAGE_SHIFT;
@@ -1236,12 +1234,6 @@ static bool vgt_cmd_addr_audit_with_bitmap(struct parser_exec_state *s,
 	unsigned int bit;
 	unsigned int delta = 0;
 	int cmd_len = cmd_length(s);
-	struct vgt_device *vgt = s->vgt;
-
-	if (vgt->vm_id && vgt->ha.enabled) {
-		if (s->info->opcode == OP_XY_SRC_COPY_BLT)
-			printk("XXH: OP_XY_SRC_COPY_BLT delta %d\n", gmadr_dw_number(s) - 1);
-	}
 
 	for_each_set_bit(bit, &addr_bitmap, sizeof(addr_bitmap)*8) {
 		if (bit + delta >= cmd_len)

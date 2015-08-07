@@ -356,13 +356,13 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 
 	ha = &(vgt->ha);
 	if (vgt->vm_id != 0) {
-		ha->saved_for_restore = false;
 		ha->request = 0;
 		ha->time = 1000;
 		ha->checkpoint_id = ha->checkpoint_request = 0;
 		ha->saving = ha->save_request = 0;
 		ha->restoring = ha->restore_request = 0;
 		ha->enabled = false;
+		ha->logdirty_stop = false;
 		ha->incremental = false;
 		ha->gm_first_cached = false;
 		ha->guest_gm_bitmap_size = SIZE_1MB;//=4G >> PAGE_SHIFT
@@ -450,8 +450,10 @@ err2:
 			vfree(vgt->ha.guest_pages);*/
 		if (ha->saved_context_save_area)
 			vfree(ha->saved_context_save_area);
-		if(ha->saved_gtt)
+		if (ha->saved_gtt)
 			vfree(ha->saved_gtt);
+		if (ha->vgt_info_blob.data)
+			vfree(ha->vgt_info_blob.data);
 	}
 	if (vgt->vgt_id >= 0)
 		free_vgt_id(vgt->vgt_id);
@@ -484,17 +486,10 @@ void vgt_release_instance(struct vgt_device *vgt)
 	if (vgt->ha.request_thread)
 		kthread_stop(vgt->ha.request_thread);
 	if (vgt->vm_id != 0) {
-		/*vfree(vgt->ha.saved_gm);
-		vfree(vgt->ha.saved_gm_bitmap);
-		vfree(vgt->ha.saved_gm_bitmap_swap);
-		hash_for_each_safe(vgt->ha.guest_page_hash_table, i, n, gp, node)
-			vgt_ha_clean_guest_page(vgt, gp);
-		vfree(vgt->ha.guest_pages);*/
-		if (!ha->saved_for_restore) {
-			vfree(ha->saved_gtt);
-			vfree(ha->saved_context_save_area);
+		vfree(ha->saved_gtt);
+		vfree(ha->saved_context_save_area);
+		if (ha->vgt_info_blob.data)
 			vfree(ha->vgt_info_blob.data);
-		}
 	}
 
 	printk("check render ownership...\n");
@@ -586,15 +581,10 @@ void vgt_release_instance(struct vgt_device *vgt)
 	free_vm_rsvd_aperture(vgt);
 	vfree(vgt->state.vReg);
 	vfree(vgt->state.sReg);
-	if (!ha->saved_for_restore) {
-		vfree(vgt->state.vReg_cp);
-		vfree(vgt->state.sReg_cp);
-		vfree(vgt);
-		printk("vGT: vgt_release_instance done\n");
-	}
-	else {
-		printk("XXH: cp saved vgt_release_instance not done\n");
-	}
+	vfree(vgt->state.vReg_cp);
+	vfree(vgt->state.sReg_cp);
+	vfree(vgt);
+	printk("vGT: vgt_release_instance done\n");
 }
 
 void vgt_reset_ppgtt(struct vgt_device *vgt, unsigned long ring_bitmap)
