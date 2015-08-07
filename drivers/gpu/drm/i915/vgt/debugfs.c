@@ -1103,7 +1103,27 @@ static const struct file_operations ha_state_fops = {
 	.release = single_release,
 };
 
-static ssize_t vgt_ha_vgt_info_read(struct file *file, char __user *user_buf,
+static ssize_t ha_gm_bitmap_read(struct file *file, char __user *user_buf,
+                             size_t count, loff_t *ppos)
+{
+	struct vgt_device *vgt = file->private_data;
+	vgt_ha_t *ha = &(vgt->ha);
+	struct debugfs_blob_wrapper *blob = &ha->guest_gm_bitmap_blob;
+	// XXH: if not ha enabled then it is in migration.
+	if (!vgt->ha.enabled) {
+		memset(ha->dirty_gm_bitmap, 0, ha->guest_gm_bitmap_size / BITS_PER_BYTE);
+	}
+	return simple_read_from_buffer(user_buf, count, ppos, blob->data,
+			blob->size);
+}
+
+static const struct file_operations ha_gm_bitmap_fops = {
+       .open = simple_open,
+       .read = ha_gm_bitmap_read,
+       .llseek = default_llseek,
+};
+
+static ssize_t ha_vgt_info_read(struct file *file, char __user *user_buf,
                              size_t count, loff_t *ppos)
 {
        struct vgt_device *vgt = file->private_data;
@@ -1128,7 +1148,7 @@ static ssize_t vgt_ha_vgt_info_read(struct file *file, char __user *user_buf,
                        blob->size);
 }
 
-static ssize_t vgt_ha_vgt_info_write(struct file *file,
+static ssize_t ha_vgt_info_write(struct file *file,
                const char __user *ubuf, size_t count, loff_t *ppos)
 {
        struct vgt_device *vgt = file->private_data;
@@ -1139,8 +1159,8 @@ static ssize_t vgt_ha_vgt_info_write(struct file *file,
 
 static const struct file_operations ha_vgt_info_fops = {
        .open = simple_open,
-       .read = vgt_ha_vgt_info_read,
-       .write = vgt_ha_vgt_info_write,
+       .read = ha_vgt_info_read,
+       .write = ha_vgt_info_write,
        .llseek = default_llseek,
 };
 
@@ -1339,10 +1359,11 @@ int vgt_create_debugfs(struct vgt_device *vgt)
 	else
 		printk("vGT(%d): create debugfs node: ha_checkpoint\n", vgt_id);
 
-	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_GM_BITMAP] = debugfs_create_blob("ha_gm_bitmap",
+	d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_GM_BITMAP] = debugfs_create_file("ha_gm_bitmap",
 			0444,
 			d_per_vgt[vgt_id],
-			&vgt->ha.guest_gm_bitmap_blob);
+			vgt,
+			&ha_gm_bitmap_fops);
 
 	if (!d_debugfs_entry[vgt_id][VGT_DEBUGFS_HA_GM_BITMAP])
 		printk(KERN_ERR "vGT(%d): failed to create debugfs node: ha_gm_bitmap\n", vgt_id);

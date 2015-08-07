@@ -2117,7 +2117,7 @@ int vgt_ha_create_checkpoint(struct vgt_device *vgt)
 	struct pgt_device *pdev = vgt->pdev;
 	vgt_ha_t *ha = &(vgt->ha);
 	/*int cpu;
-	int i = 0;*/
+	  int i = 0;*/
 	vgt_info("XXH: create cp %d\n", vgt->ha.checkpoint_id);
 	vgt->ha.checkpoint_id++;
 	//vgt_lock_dev(pdev, cpu);

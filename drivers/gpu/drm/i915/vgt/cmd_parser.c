@@ -2373,15 +2373,12 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 
 	vgt_cmd_addr_audit_with_bitmap(s, info->addr_bitmap);
 
-	/* XXH: note the ring is stopped when suspending
-	 * the ring buffer is no need to be saved?
+	/* XXH: Note the ring is stopped when suspending.
+	 * The ring buffer is no need to be saved?
 	 */
 	/*if (vgt->vm_id)
 		set_dirty_gm_bitmap(s);*/
 
-	/* Let's keep this logic here. Someone has special needs for dumping
-	 * commands can customize this code snippet.
-	 */
 #if 1
 	/* XXH: use klog to colloct gpu commands
 	 * vmid cmd_name type opcode addr_bitmap length [parameters]
@@ -2405,6 +2402,9 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 	}
 	klog_printk("\n");
 #endif
+	/* Let's keep this logic here. Someone has special needs for dumping
+	 * commands can customize this code snippet.
+	 */
 #if 0
 	klog_printk("VM%d CMD %s name %s op 0x%x addr_cnt %x ip(%08lx): ",
 			vgt->vm_id,
