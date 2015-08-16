@@ -645,11 +645,44 @@ static inline int cmd_length(struct parser_exec_state *s)
 	}
 }
 
+static unsigned long get_gma_bb_from_cmd(struct parser_exec_state *s, int index)
+{
+	unsigned long addr;
+	int32_t gma_high, gma_low;
+	int gmadr_bytes = s->vgt->pdev->device_info.gmadr_bytes_in_cmd;
+
+	ASSERT(gmadr_bytes == 4 || gmadr_bytes == 8);
+
+	gma_low = cmd_val(s, index) & BATCH_BUFFER_ADDR_MASK;
+
+	if (gmadr_bytes == 4) {
+		addr = gma_low;
+	} else {
+		gma_high = cmd_val(s, index + 1) & BATCH_BUFFER_ADDR_HIGH_MASK;
+		addr = (((unsigned long)gma_high) << 32) | gma_low;
+	}
+
+	return addr;
+}
+
 static bool addr_audit_32(struct parser_exec_state *s, int index)
 {
 	/* TODO:
 	 * Add the address audit implementation here. Right now do nothing
 	 */
+	struct vgt_device *vgt = s->vgt;
+	unsigned long gma, gfn, gpa;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
+
+	/* XXH: audit all addr here no matter it is read or write */
+	if (vgt->vm_id) {
+		gma = get_gma_bb_from_cmd(s, index);
+		gpa = vgt_gma_to_gpa(mm, gma);
+		if (gpa != INVALID_ADDR) {
+			gfn = gpa >> PAGE_SHIFT;
+			bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
+		}
+	}
 	return true;
 }
 
@@ -1105,6 +1138,7 @@ static int vgt_cmd_handler_mi_display_flip(struct parser_exec_state *s)
 	addr_audit_32(s, 2);
 	return vgt_handle_mi_display_flip(s, false);
 }
+
 static bool is_wait_for_flip_pending(uint32_t cmd)
 {
 	return cmd & (MI_WAIT_FOR_PLANE_A_FLIP_PENDING |
@@ -1183,26 +1217,6 @@ static int vgt_handle_mi_wait_for_event(struct parser_exec_state *s)
 	return rc;
 }
 
-static unsigned long get_gma_bb_from_cmd(struct parser_exec_state *s, int index)
-{
-	unsigned long addr;
-	int32_t gma_high, gma_low;
-	int gmadr_bytes = s->vgt->pdev->device_info.gmadr_bytes_in_cmd;
-
-	ASSERT(gmadr_bytes == 4 || gmadr_bytes == 8);
-
-	gma_low = cmd_val(s, index) & BATCH_BUFFER_ADDR_MASK;
-
-	if (gmadr_bytes == 4) {
-		addr = gma_low;
-	} else {
-		gma_high = cmd_val(s, index + 1) & BATCH_BUFFER_ADDR_HIGH_MASK;
-		addr = (((unsigned long)gma_high) << 32) | gma_low;
-	}
-
-	return addr;
-}
-
 static bool address_audit(struct parser_exec_state *s, int index)
 {
 	int gmadr_bytes = s->vgt->pdev->device_info.gmadr_bytes_in_cmd;
@@ -1223,7 +1237,6 @@ static bool address_audit(struct parser_exec_state *s, int index)
 			gfn = gpa >> PAGE_SHIFT;
 			bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
 		}
-		
 	}
 	return true;
 }
@@ -1295,6 +1308,9 @@ static int batch_buffer_needs_scan(struct parser_exec_state *s)
 		if (cmd_val(s, 0) & (1 << 8))
 			return 0;
 	} else if (IS_HSW(pdev)) {
+		// XXH: to set gm dirty bitmap
+		if (!s->vgt->ha.skip_bb_scan)
+			return 1;
 		/* pre-BDW has dedicated privilege bit */
 		if (cmd_val(s, 0) & (1 << 13))
 			return 0;

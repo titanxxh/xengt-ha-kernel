@@ -1525,7 +1525,7 @@ bool gtt_mmio_write(struct vgt_device *vgt, unsigned int off,
 						vgt_info("XXH: dummy page gfn %lx\n", vgt->ha.dummy_page_gfn);
 					}
 					bitmap_set(vgt->ha.guest_gm_bitmap, gfn, 1);
-					//bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
+					bitmap_set(vgt->ha.dirty_gm_bitmap, gfn, 1);
 				}
 				else
 					vgt_err("XXH: write gtt set gfn too large!\n");

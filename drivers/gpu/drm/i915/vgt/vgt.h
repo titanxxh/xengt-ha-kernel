@@ -920,6 +920,7 @@ typedef struct {
 	bool enabled;
 	bool reg_track;
 	bool logdirty_stop;
+	bool skip_bb_scan;
 
 //not used now
 	int checkpoint_request;

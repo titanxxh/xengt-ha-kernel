@@ -363,6 +363,7 @@ int create_vgt_instance(struct pgt_device *pdev, struct vgt_device **ptr_vgt, vg
 		ha->restoring = ha->restore_request = 0;
 		ha->enabled = false;
 		ha->logdirty_stop = false;
+		ha->skip_bb_scan = false;
 		ha->incremental = false;
 		ha->gm_first_cached = false;
 		ha->guest_gm_bitmap_size = SIZE_1MB;//=4G >> PAGE_SHIFT

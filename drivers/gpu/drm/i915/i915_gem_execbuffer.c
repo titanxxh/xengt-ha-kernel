@@ -1337,6 +1337,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 		return ret;
 
 	flags = 0;
+	flags |= I915_DISPATCH_SECURE;
 	if (args->flags & I915_EXEC_SECURE) {
 		if (!file->is_master || !capable(CAP_SYS_ADMIN))
 		    return -EPERM;

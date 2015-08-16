@@ -1005,6 +1005,9 @@ static ssize_t vgt_ha_checkpoint_write(struct file *file,
 	} else if (!strncmp(buf, "disable", 7)) {
 		vgt->ha.enabled = 0;
 		vgt_info("ha disabled\n");
+	} else if (!strncmp(buf, "scan", 4)) {
+		vgt->ha.skip_bb_scan = !vgt->ha.skip_bb_scan;
+		vgt_info("skip_bb_scan %d\n", vgt->ha.skip_bb_scan);
 	} else if (!strncmp(buf, "logdirty_stop", 13)) {
 		vgt->ha.logdirty_stop = 1;
 		vgt_info("logdirty will stop\n");
@@ -1075,7 +1078,7 @@ static int vgt_ha_state_show(struct seq_file *m, void *data)
 		    ha->logdirty_stop << 2;
 
 	ha->logdirty_stop = 0;
-	vgt_info("ha state %x\n", state);
+	//vgt_info("ha state %x\n", state);
 	seq_printf(m, "%u\n", state);
 	return 0;
 }
