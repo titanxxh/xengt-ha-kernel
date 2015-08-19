@@ -2361,7 +2361,8 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 	uint32_t cmd, cmd_len, i = 0, bit;
 	int rc = 0;
 	struct vgt_device *vgt = s->vgt;
-	unsigned long gma, addr_bitmap;
+	unsigned long gma, addr_bitmap, gpa;
+	struct vgt_mm *mm = vgt->gtt.ggtt_mm;
 
 	hypervisor_read_va(s->vgt, s->ip_va, &cmd, sizeof(cmd), 1);
 
@@ -2406,7 +2407,8 @@ static int vgt_cmd_parser_exec(struct parser_exec_state *s)
 	addr_bitmap = s->info->addr_bitmap;
 	for_each_set_bit(bit, &addr_bitmap, sizeof(addr_bitmap)*8) {
 		gma = get_gma_bb_from_cmd(s, bit);
-		klog_printk("%lx ", gma);
+		gpa = vgt_gma_to_gpa(mm, gma);
+		klog_printk("%lx ", gpa);
 	}
 	klog_printk("\n");
 #endif

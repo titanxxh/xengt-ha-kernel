@@ -254,7 +254,7 @@ static int hvm_create_iorequest_server(struct vgt_device *vgt)
 	arg.handle_bufioreq = 0;
 	r = HYPERVISOR_hvm_op(HVMOP_create_ioreq_server, &arg);
 	if (r < 0) {
-		printk(KERN_ERR "Cannot create io-requset server: %d!\n", r);
+		printk(KERN_ERR "Cannot create io-request server: %d!\n", r);
 		return r;
 	}
 	info->iosrv_id = arg.id;

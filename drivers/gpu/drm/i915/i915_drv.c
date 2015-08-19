@@ -564,6 +564,7 @@ static int i915_drm_suspend(struct drm_device *dev)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_crtc *crtc;
 	pci_power_t opregion_target_state;
+	struct timeval time;
 
 	/* ignore lid events during suspend */
 	mutex_lock(&dev_priv->modeset_restore_lock);
@@ -582,7 +583,11 @@ static int i915_drm_suspend(struct drm_device *dev)
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		int error;
 
+		do_gettimeofday(&time);
+		printk("XXH %s suspend gem_suspend start %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 		error = i915_gem_suspend(dev);
+		do_gettimeofday(&time);
+		printk("XXH %s suspend gem_suspend end %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 		if (error) {
 			dev_err(&dev->pdev->dev,
 				"GEM idle failed, resume might fail\n");
@@ -610,11 +615,15 @@ static int i915_drm_suspend(struct drm_device *dev)
 		intel_suspend_hw(dev);
 	}
 
-	printk("XXH %s suspend gtt start\n", __func__);
+	do_gettimeofday(&time);
+	printk("XXH %s suspend gtt start %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 	i915_gem_suspend_gtt_mappings(dev);
-	printk("XXH %s suspend gtt end\n", __func__);
+	do_gettimeofday(&time);
+	printk("XXH %s suspend gtt end %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 
 	i915_save_state(dev);
+	do_gettimeofday(&time);
+	printk("XXH %s suspend save_state end %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 
 	opregion_target_state = PCI_D3cold;
 #if IS_ENABLED(CONFIG_ACPI_SLEEP)
@@ -632,7 +641,8 @@ static int i915_drm_suspend(struct drm_device *dev)
 
 	intel_display_set_init_power(dev_priv, false);
 
-	printk("XXH %s suspend end\n", __func__);
+	do_gettimeofday(&time);
+	printk("XXH %s suspend end %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 	return 0;
 }
 
@@ -683,6 +693,7 @@ static int i915_drm_resume(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = 0;
+	struct timeval time;
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		mutex_lock(&dev->struct_mutex);
@@ -746,7 +757,8 @@ static int i915_drm_resume(struct drm_device *dev)
 
 	drm_kms_helper_poll_enable(dev);
 
-	printk("XXH %s resume end\n", __func__);
+	do_gettimeofday(&time);
+	printk("XXH %s resume end %lu.%06lu\n", __func__, time.tv_sec, time.tv_usec);
 	return 0;
 }
 
@@ -939,8 +951,10 @@ static int i915_pm_suspend(struct device *dev)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
 	int error;
+	struct timeval time;
 
-	printk("XXH: %s %s\n", __func__, dev_name(dev));
+	do_gettimeofday(&time);
+	printk("XXH: %s %s %lu.%06lu\n", dev_name(dev), __func__, time.tv_sec, time.tv_usec);
 	if (!drm_dev || !drm_dev->dev_private) {
 		dev_err(dev, "DRM not initialized, aborting suspend.\n");
 		return -ENODEV;
@@ -998,8 +1012,10 @@ static int i915_pm_resume(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct drm_device *drm_dev = pci_get_drvdata(pdev);
+	struct timeval time;
 
-	printk("XXH: %s %s\n", __func__, dev_name(dev));
+	do_gettimeofday(&time);
+	printk("XXH: %s %s %lu.%06lu\n", dev_name(dev), __func__, time.tv_sec, time.tv_usec);
 	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 
